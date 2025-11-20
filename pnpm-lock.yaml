@@ -6,7 +6,9 @@ settings:
 
 importers:
 
-  .:
+  .: {}
+
+  fetch-problem:
     dependencies:
       cheerio:
         specifier: ^1.1.2
@@ -14,6 +16,8 @@ importers:
       node-fetch:
         specifier: ^3.3.2
         version: 3.3.2
+
+  frontend: {}
 
 packages:
 

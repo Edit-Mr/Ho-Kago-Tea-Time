@@ -4,8 +4,8 @@ import * as cheerio from "cheerio";
 
 const BASE_URL = "https://114hsinchuhackathon.com/wish-content/?proposal_id=";
 
-const START_ID = 7;
-const END_ID = 142;
+const START_ID = 1;
+const END_ID = 214;
 
 const results = [];
 
@@ -50,8 +50,17 @@ async function scrapeProposal(id) {
 }
 
 async function main() {
+    const BATCH_SIZE = 20;
+    const allIds = [];
     for (let id = START_ID; id <= END_ID; id++) {
-        await scrapeProposal(id);
+        allIds.push(id);
+    }
+
+    // Process in batches of 20
+    for (let i = 0; i < allIds.length; i += BATCH_SIZE) {
+        const batch = allIds.slice(i, i + BATCH_SIZE);
+        console.log(`\n🔄 Fetching batch ${Math.floor(i / BATCH_SIZE) + 1} (IDs ${batch[0]}-${batch[batch.length - 1]})...`);
+        await Promise.all(batch.map(id => scrapeProposal(id)));
     }
 
     // CSV header
