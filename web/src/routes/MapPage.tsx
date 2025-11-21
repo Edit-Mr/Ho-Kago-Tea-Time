@@ -26,14 +26,13 @@ function MapPage() {
   const facilityTypesMeta = useDataStore((s) => s.facilityTypes);
   const viewport = useMapStore((s) => s.viewport);
 
-  // Initial load uses the starting viewport center; avoid tying to drag/pan to prevent reloads on every move.
+  // Keep data in sync with wherever the map center moves; loadAll will no-op if still inside the current county.
   useEffect(() => {
     const areaFromCenter = viewport.center as [number, number];
     loadAll({ center: areaFromCenter }).catch(() => {
       // error handled via store state
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [loadAll, viewport.center]);
 
   // Allow reloading when a different area is explicitly selected (e.g., via list/search), not on map drags.
   useEffect(() => {
