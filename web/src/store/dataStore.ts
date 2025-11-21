@@ -118,13 +118,20 @@ export const useDataStore = create<DataState>((set, get) => ({
       }
 
       const areaSelect = needsGeom ? "full" : "lite";
-      const areasRes = await fetchAreas(
-        countyFilter
-          ? { county: countyFilter, select: areaSelect }
-          : tentativeAreaId
-            ? { areaId: tentativeAreaId, select: areaSelect }
-            : { select: areaSelect }
-      );
+      const existingAreas = get().areas;
+      const canReuseAreas = countyFilter && existingAreas.length > 0 && get().currentCounty === countyFilter;
+      const needGeomButMissing = needsGeom && !existingAreas.every((a) => a.geom);
+      const shouldFetchAreas = !canReuseAreas || needGeomButMissing || (!countyFilter && !tentativeAreaId);
+
+      const areasRes = shouldFetchAreas
+        ? await fetchAreas(
+          countyFilter
+            ? { county: countyFilter, select: areaSelect, level: "village" }
+            : tentativeAreaId
+              ? { areaId: tentativeAreaId, select: areaSelect }
+              : { select: areaSelect, level: "village" }
+        )
+        : { data: existingAreas };
       if (areasRes.error) throw new Error(areasRes.error);
 
       const areas = areasRes.data?.map((a) => ({
