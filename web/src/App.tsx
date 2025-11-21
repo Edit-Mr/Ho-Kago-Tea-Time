@@ -17,18 +17,18 @@ function App() {
       <header className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-900/60 backdrop-blur sticky top-0 z-50">
         <div className="flex items-center gap-3">
           <div className="h-10 w-10 rounded-xl bg-brand-500/80 grid place-items-center text-white font-semibold">
-            CM
+            CS
           </div>
           <div>
-            <p className="text-lg font-semibold">新竹政策雷達</p>
-            <p className="text-sm text-slate-400">熱力圖、風險與任務</p>
+            <p className="text-lg font-semibold">城視 CitySight</p>
+            <p className="text-sm text-slate-400">讓城市安全看得見</p>
           </div>
         </div>
         <nav className="flex items-center gap-3 text-sm font-medium">
           <NavLink to="/">地圖</NavLink>
           <NavLink to="/dashboard/demo-area">儀表板</NavLink>
           <NavLink to="/admin">管理員</NavLink>
-          <NavLink to="/missions">任務強</NavLink>
+          <NavLink to="/missions">任務牆</NavLink>
         </nav>
       </header>
 

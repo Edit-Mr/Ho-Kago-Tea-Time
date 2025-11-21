@@ -1,32 +1,83 @@
 import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
+import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Select } from "../components/ui/select";
+import { Textarea } from "../components/ui/textarea";
+import { Drawer } from "../components/ui/drawer";
 import { useDataStore } from "../store/dataStore";
 
-type MissionStatus = "open" | "completed" | "expired";
+type ReportForm = {
+  isHealthy: "yes" | "no" | "";
+  needsMaintenance: "yes" | "no" | "";
+  note: string;
+  photo?: File | null;
+};
 
 function MissionsPage() {
   const [area, setArea] = useState("all");
   const [type, setType] = useState("all");
   const [keyword, setKeyword] = useState("");
-  const { missions, areas, facilities, loadAll } = useDataStore();
+  const [reportingFacilityId, setReportingFacilityId] = useState<string | null>(null);
+  const [reportForm, setReportForm] = useState<ReportForm>({ isHealthy: "", needsMaintenance: "", note: "", photo: null });
+  const { areas, facilities, loadAll } = useDataStore();
 
   useEffect(() => {
     loadAll().catch(() => {});
   }, [loadAll]);
 
+  const upcomingInspections = useMemo(() => {
+    return facilities
+      .filter((f) => f.lastInspection)
+      .map((f) => {
+        const last = f.lastInspection ? new Date(f.lastInspection).getTime() : Date.now();
+        const nextDue = last + 30 * 24 * 60 * 60 * 1000;
+        const daysLeft = Math.max(0, Math.round((nextDue - Date.now()) / (1000 * 60 * 60 * 24)));
+        const areaName = areas.find((a) => a.id === f.areaId)?.name ?? "未指定";
+        return {
+          id: f.id,
+          name: f.name,
+          type: f.type,
+          typeLabel: f.typeLabel ?? f.type,
+          typeEmoji: f.typeEmoji ?? undefined,
+          area: areaName,
+          dueInDays: daysLeft,
+          lastInspection: f.lastInspection?.slice(0, 10) ?? "—",
+        };
+      })
+      .sort((a, b) => a.dueInDays - b.dueInDays);
+  }, [areas, facilities]);
+
   const filtered = useMemo(() => {
-    return missions.filter((mission) => {
-      const areaName = areas.find((a) => a.id === mission.areaId)?.name;
-      const facilityName = facilities.find((f) => f.id === mission.facilityId)?.name;
-      const matchesArea = area === "all" || mission.areaId === area;
-      const matchesType = type === "all" || mission.type === type;
-      const matchesKeyword = keyword ? (mission.title?.includes(keyword) || facilityName?.includes(keyword) || areaName?.includes(keyword)) : true;
+    return upcomingInspections.filter((item) => {
+      const matchesArea = area === "all" || facilities.find((f) => f.id === item.id)?.areaId === area;
+      const matchesType = type === "all" || item.type === type;
+      const matchesKeyword = keyword ? item.name.includes(keyword) || item.area.includes(keyword) : true;
       return matchesArea && matchesType && matchesKeyword;
     });
-  }, [missions, area, type, keyword, areas, facilities]);
+  }, [area, facilities, keyword, type, upcomingInspections]);
+
+  const areaOptions = useMemo(() => [{ id: "all", name: "全部區域" }, ...areas], [areas]);
+
+  const handleOpenReport = (facilityId: string) => {
+    setReportingFacilityId(facilityId);
+    setReportForm({ isHealthy: "", needsMaintenance: "", note: "", photo: null });
+  };
+
+  const handleSubmitReport = () => {
+    const payload = {
+      facilityId: reportingFacilityId,
+      isHealthy: reportForm.isHealthy,
+      needsMaintenance: reportForm.needsMaintenance,
+      note: reportForm.note,
+      photo: reportForm.photo?.name,
+    };
+    // In real app, send to API; keeping console for now
+    // eslint-disable-next-line no-console
+    console.log("Citizen report submitted", payload);
+    setReportingFacilityId(null);
+  };
 
   return (
     <div className="px-6 py-6 space-y-4">
@@ -34,11 +85,11 @@ function MissionsPage() {
         <div>
           <p className="text-sm text-slate-400">居民任務牆</p>
           <h1 className="text-2xl font-semibold text-slate-50">Missions</h1>
+          <p className="text-xs text-slate-500">列出即將到期檢查的設施，居民可主動回報狀態</p>
         </div>
         <div className="flex gap-2">
           <Select value={area} onChange={(e) => setArea(e.target.value)}>
-            <option value="all">全部區域</option>
-            {areas.map((a) => (
+            {areaOptions.map((a) => (
               <option key={a.id} value={a.id}>{a.name}</option>
             ))}
           </Select>
@@ -46,69 +97,100 @@ function MissionsPage() {
             <option value="all">全部類型</option>
             <option value="park">公園</option>
             <option value="street_light">路燈</option>
-            <option value="road">道路</option>
+            <option value="road_hazard">道路坑洞</option>
             <option value="sidewalk">人行道</option>
+            <option value="playground">遊戲場</option>
             <option value="other">其他</option>
           </Select>
-          <Input placeholder="關鍵字" value={keyword} onChange={(e) => setKeyword(e.target.value)} />
+          <Input placeholder="搜尋設施或區域" value={keyword} onChange={(e) => setKeyword(e.target.value)} />
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
         {filtered.map((mission) => (
-          <MissionCard
-            key={mission.id}
-            mission={{
-              ...mission,
-              area: areas.find((a) => a.id === mission.areaId)?.name ?? "未指定",
-              facility: facilities.find((f) => f.id === mission.facilityId)?.name ?? "未指定",
-              due: mission.dueAt ? new Date(mission.dueAt).toISOString().slice(0, 10) : "—",
-              status: (mission.status as MissionStatus) ?? "open",
-            }}
-          />
+          <Card key={mission.id}>
+            <CardHeader className="flex items-start justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  {mission.typeEmoji && <span>{mission.typeEmoji}</span>}
+                  <span>{mission.name}</span>
+                </CardTitle>
+                <p className="text-xs text-slate-400">
+                  {mission.area} · {mission.typeLabel}
+                </p>
+              </div>
+              <Badge variant={mission.dueInDays <= 5 ? "warning" : "secondary"}>{mission.dueInDays} 天內檢查</Badge>
+            </CardHeader>
+            <CardContent className="space-y-2 text-sm text-slate-200">
+              <p className="text-xs text-slate-400">上次檢查：{mission.lastInspection}</p>
+              <p className="text-xs text-slate-400">預估下次：{mission.dueInDays} 天內</p>
+              <Button onClick={() => handleOpenReport(mission.id)}>居民回報</Button>
+            </CardContent>
+          </Card>
         ))}
+        {filtered.length === 0 && <p className="text-sm text-slate-400">目前沒有即將到期的設施</p>}
       </div>
+
+      <ReportDrawer
+        open={Boolean(reportingFacilityId)}
+        onClose={() => setReportingFacilityId(null)}
+        form={reportForm}
+        onChange={setReportForm}
+        onSubmit={handleSubmitReport}
+      />
     </div>
   );
 }
 
-function MissionCard({
-  mission,
+function ReportDrawer({
+  open,
+  onClose,
+  form,
+  onChange,
+  onSubmit,
 }: {
-  mission: {
-    id: string;
-    title: string;
-    area: string;
-    facility: string;
-    due: string;
-    status: MissionStatus;
-    type?: string | null;
-    description?: string | null;
-  };
+  open: boolean;
+  onClose: () => void;
+  form: ReportForm;
+  onChange: (f: ReportForm) => void;
+  onSubmit: () => void;
 }) {
-  const statusChip =
-    mission.status === "open"
-      ? { label: "招募中", variant: "warning" as const }
-      : mission.status === "completed"
-        ? { label: "完成", variant: "success" as const }
-        : { label: "已到期", variant: "danger" as const };
-
   return (
-    <Card>
-      <CardHeader className="flex items-start justify-between">
+    <Drawer open={open} onClose={onClose} title="居民回報">
+      <div className="space-y-4 text-sm text-slate-200">
         <div>
-          <CardTitle>{mission.title}</CardTitle>
-          <p className="text-xs text-slate-400">
-            {mission.area} · {mission.facility}
-          </p>
+          <p className="text-xs text-slate-400 pb-1">設備狀態是否良好？</p>
+          <div className="flex gap-2">
+            <Button variant={form.isHealthy === "yes" ? "primary" : "secondary"} onClick={() => onChange({ ...form, isHealthy: "yes" })}>是</Button>
+            <Button variant={form.isHealthy === "no" ? "primary" : "secondary"} onClick={() => onChange({ ...form, isHealthy: "no" })}>否</Button>
+          </div>
         </div>
-        <Badge variant={statusChip.variant}>{statusChip.label}</Badge>
-      </CardHeader>
-      <CardContent className="space-y-2 text-sm text-slate-200">
-        <p>{mission.description}</p>
-        <p className="text-xs text-slate-400">Due: {mission.due}</p>
-      </CardContent>
-    </Card>
+        <div>
+          <p className="text-xs text-slate-400 pb-1">是否需要維護？</p>
+          <div className="flex gap-2">
+            <Button variant={form.needsMaintenance === "yes" ? "primary" : "secondary"} onClick={() => onChange({ ...form, needsMaintenance: "yes" })}>需要</Button>
+            <Button variant={form.needsMaintenance === "no" ? "primary" : "secondary"} onClick={() => onChange({ ...form, needsMaintenance: "no" })}>不需要</Button>
+          </div>
+        </div>
+        <div>
+          <p className="text-xs text-slate-400 pb-1">留言</p>
+          <Textarea
+            placeholder="描述現場狀況..."
+            value={form.note}
+            onChange={(e) => onChange({ ...form, note: e.target.value })}
+          />
+        </div>
+        <div>
+          <p className="text-xs text-slate-400 pb-1">上傳照片 (選填)</p>
+          <Input type="file" accept="image/*" onChange={(e) => onChange({ ...form, photo: e.target.files?.[0] ?? null })} />
+          {form.photo && <p className="text-xs text-slate-500 mt-1">已選擇：{form.photo.name}</p>}
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={onClose}>取消</Button>
+          <Button onClick={onSubmit} disabled={!form.isHealthy || !form.needsMaintenance}>送出</Button>
+        </div>
+      </div>
+    </Drawer>
   );
 }
 
