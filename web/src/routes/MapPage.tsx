@@ -216,12 +216,17 @@ function MapPage() {
 
       {isRightPanelOpen && (
         <div className="absolute top-4 right-4 bottom-4 w-[360px] overflow-y-auto space-y-3 z-10">
-          {selectedFacility ? (
+          {loading ? (
+            <>
+              <InfoSkeleton />
+              <InfoSkeleton />
+            </>
+          ) : selectedFacility ? (
             <FacilityCard facility={selectedFacility} />
           ) : selectedArea ? (
             <AreaCard area={selectedArea} />
           ) : null}
-          <NearbyIssues tickets={tickets} areas={areas} selectedAreaId={selectedAreaId} />
+          {!loading && <NearbyIssues tickets={tickets} areas={areas} selectedAreaId={selectedAreaId} />}
         </div>
       )}
 
@@ -241,11 +246,21 @@ function MapPage() {
         areas={areas}
       />
 
-      {loading && (
-        <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm grid place-items-center text-slate-200 text-sm z-20">
-          載入資料中...
-        </div>
-      )}
+    </div>
+  );
+}
+
+function InfoSkeleton() {
+  return (
+    <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 animate-pulse space-y-3">
+      <div className="h-4 w-32 rounded bg-slate-700/60" />
+      <div className="h-6 w-48 rounded bg-slate-700/50" />
+      <div className="h-[1px] w-full bg-slate-800" />
+      <div className="space-y-2">
+        <div className="h-3 w-full rounded bg-slate-700/40" />
+        <div className="h-3 w-5/6 rounded bg-slate-700/40" />
+        <div className="h-3 w-2/3 rounded bg-slate-700/40" />
+      </div>
     </div>
   );
 }
