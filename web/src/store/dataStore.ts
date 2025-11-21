@@ -16,6 +16,7 @@ export type FacilityRecord = {
   areaId?: string | null;
   type: string;
   name: string;
+  iconEmoji?: string | null;
   coords?: [number, number];
   grade?: "A" | "B" | "C";
   lastInspection?: string;
@@ -121,6 +122,7 @@ export const useDataStore = create<DataState>((set) => ({
           areaId: f.areaId,
           type: f.type,
           name: f.name,
+          iconEmoji: f.iconEmoji ?? null,
           coords: (f.geom as GeoJSON.Point | undefined)?.coordinates as [number, number] | undefined,
           grade: (f.healthGrade as FacilityRecord["grade"]) ?? undefined,
           lastInspection: latestInspection?.inspectedAt ?? f.lastInspectionAt ?? undefined,

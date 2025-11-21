@@ -84,11 +84,11 @@ export async function fetchAreaRiskSnapshots(): Promise<ApiResult<Array<{ areaId
   };
 }
 
-export async function fetchFacilities(): Promise<ApiResult<Array<{ id: string; areaId?: string | null; type: string; name: string; geom: GeoJSON.Geometry; healthGrade?: string | null; lastInspectionAt?: string | null; hasOpenTicket?: boolean }>>> {
+export async function fetchFacilities(): Promise<ApiResult<Array<{ id: string; areaId?: string | null; type: string; name: string; iconEmoji?: string | null; geom: GeoJSON.Geometry; healthGrade?: string | null; lastInspectionAt?: string | null; hasOpenTicket?: boolean }>>> {
   if (!supabase) return { error: "Supabase 環境變數未設定" };
   const { data, error } = await supabase
     .from("facilities")
-    .select("id,area_id,type,name,geom,health_grade,last_inspection_at,has_open_ticket");
+    .select("id,area_id,type,name,icon_emoji,geom,health_grade,last_inspection_at,has_open_ticket");
   if (error) return { error: error.message };
   return {
     data: data?.map((row) => ({
@@ -96,6 +96,7 @@ export async function fetchFacilities(): Promise<ApiResult<Array<{ id: string; a
       areaId: row.area_id,
       type: row.type,
       name: row.name,
+      iconEmoji: row.icon_emoji,
       geom: row.geom as GeoJSON.Geometry,
       healthGrade: row.health_grade,
       lastInspectionAt: row.last_inspection_at,

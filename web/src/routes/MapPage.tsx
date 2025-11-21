@@ -101,7 +101,7 @@ function MapPage() {
           lastInspection: f.lastInspection?.slice(0, 10) ?? "—",
           incidentsPastYear: f.incidentsPastYear ?? 0,
           coordinates: f.coords as [number, number],
-          icon: mapFacilityIcon(f.type),
+          iconEmoji: f.iconEmoji ?? undefined,
         })),
     [facilities]
   );
@@ -124,7 +124,7 @@ function MapPage() {
   };
 
   return (
-    <div className="relative w-full h-[calc(100vh-88px)]">
+    <div className="relative w-full h-[calc(100vh-82px)]">
       <div className="absolute inset-0">
         <MapView
           areasGeoJson={geojsonAreas}
@@ -238,17 +238,6 @@ function NearbyIssues({ tickets, areas }: { tickets: TicketRecord[]; areas: Area
       </CardContent>
     </Card>
   );
-}
-
-function mapFacilityIcon(type: string) {
-  if (type === "park" || type === "playground") return "park-15";
-  if (type === "street_light" || type === "streetlight") return "marker-15";
-  if (type === "road_hazard" || type === "sidewalk") return "roadblock-15";
-  if (type === "police_station") return "police-15";
-  if (type === "drinking_fountain") return "water-15";
-  if (type === "elder_center") return "town-hall-15";
-  if (type === "school_zone") return "college-15";
-  return "marker-15";
 }
 
 export default MapPage;

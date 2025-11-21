@@ -31,6 +31,7 @@ create table if not exists public.facilities (
   area_id uuid references public.areas(id) on delete set null,
   type text not null check (type in ('park','playground','street_light','tree','toilet','other','road_hazard','police_station','sidewalk','drinking_fountain','elder_center','school_zone')),
   name text not null,
+  icon text,
   geom geometry(Point,4326) not null,
   footprint geometry(Polygon,4326),
   health_grade text check (health_grade in ('A','B','C')),
@@ -135,17 +136,17 @@ values
   ('00000000-0000-0000-0000-000000000003','南屯區','nantun', st_geomfromtext('MULTIPOLYGON(((120.62 24.155,120.665 24.155,120.665 24.115,120.62 24.115,120.62 24.155)))',4326), 168000)
 on conflict do nothing;
 
-insert into public.facilities (id, area_id, type, name, geom, health_grade, last_inspection_at)
+insert into public.facilities (id, area_id, type, name, icon, geom, health_grade, last_inspection_at)
 values
-  ('10000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000001','park','黎明公園', st_setsrid(st_makepoint(120.646,24.16),4326),'B','2024-10-05'),
-  ('10000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000001','street_light','福康五街路燈 #12', st_setsrid(st_makepoint(120.655,24.172),4326),'A','2024-11-10'),
-  ('10000000-0000-0000-0000-000000000003','00000000-0000-0000-0000-000000000001','park','文心森林公園', st_setsrid(st_makepoint(120.64,24.158),4326),'C','2024-08-20'),
-  ('10000000-0000-0000-0000-000000000004','00000000-0000-0000-0000-000000000001','street_light','福星北路路燈 #21', st_setsrid(st_makepoint(120.649,24.177),4326),'B','2024-11-05'),
-  ('10000000-0000-0000-0000-000000000005','00000000-0000-0000-0000-000000000001','police_station','西屯分局', st_setsrid(st_makepoint(120.648,24.164),4326),'A','2024-11-01'),
-  ('10000000-0000-0000-0000-000000000006','00000000-0000-0000-0000-000000000001','sidewalk','逢甲商圈人行道', st_setsrid(st_makepoint(120.6455,24.174),4326),'B','2024-09-02'),
-  ('10000000-0000-0000-0000-000000000007','00000000-0000-0000-0000-000000000002','park','崇德公園', st_setsrid(st_makepoint(120.69,24.163),4326),'B','2024-10-15'),
-  ('10000000-0000-0000-0000-000000000008','00000000-0000-0000-0000-000000000003','elder_center','南屯區樂齡中心', st_setsrid(st_makepoint(120.637,24.135),4326),'A','2024-10-30'),
-  ('10000000-0000-0000-0000-000000000009','00000000-0000-0000-0000-000000000001','drinking_fountain','草悟道飲水機', st_setsrid(st_makepoint(120.6605,24.159),4326),'B','2024-10-28')
+  ('10000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000001','park','黎明公園', 'TreeDeciduous', st_setsrid(st_makepoint(120.646,24.16),4326),'B','2024-10-05'),
+  ('10000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000001','street_light','福康五街路燈 #12', 'Lightbulb', st_setsrid(st_makepoint(120.655,24.172),4326),'A','2024-11-10'),
+  ('10000000-0000-0000-0000-000000000003','00000000-0000-0000-0000-000000000001','park','文心森林公園', 'TreeDeciduous', st_setsrid(st_makepoint(120.64,24.158),4326),'C','2024-08-20'),
+  ('10000000-0000-0000-0000-000000000004','00000000-0000-0000-0000-000000000001','street_light','福星北路路燈 #21', 'Lightbulb', st_setsrid(st_makepoint(120.649,24.177),4326),'B','2024-11-05'),
+  ('10000000-0000-0000-0000-000000000005','00000000-0000-0000-0000-000000000001','police_station','西屯分局', 'ShieldCheck', st_setsrid(st_makepoint(120.648,24.164),4326),'A','2024-11-01'),
+  ('10000000-0000-0000-0000-000000000006','00000000-0000-0000-0000-000000000001','sidewalk','逢甲商圈人行道', 'Footprints', st_setsrid(st_makepoint(120.6455,24.174),4326),'B','2024-09-02'),
+  ('10000000-0000-0000-0000-000000000007','00000000-0000-0000-0000-000000000002','park','崇德公園', 'TreeDeciduous', st_setsrid(st_makepoint(120.69,24.163),4326),'B','2024-10-15'),
+  ('10000000-0000-0000-0000-000000000008','00000000-0000-0000-0000-000000000003','elder_center','南屯區樂齡中心', 'HeartHandshake', st_setsrid(st_makepoint(120.637,24.135),4326),'A','2024-10-30'),
+  ('10000000-0000-0000-0000-000000000009','00000000-0000-0000-0000-000000000001','drinking_fountain','草悟道飲水機', 'Droplets', st_setsrid(st_makepoint(120.6605,24.159),4326),'B','2024-10-28')
 on conflict do nothing;
 
 insert into public.tickets (id, area_id, facility_id, geom, source, type, severity, status, created_at, sla_days, sla_due_at, estimated_cost, risk_impact, description)

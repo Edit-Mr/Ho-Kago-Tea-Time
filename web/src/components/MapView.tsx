@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import mapboxgl, { type Map } from "mapbox-gl";
+import type GeoJSON from "geojson";
 import { configureMapbox } from "../lib/mapbox";
 import { useMapStore } from "../store/mapStore";
 
@@ -7,11 +8,11 @@ type Facility = {
   id: string;
   name: string;
   type: string;
+  iconEmoji?: string | null;
   grade: "A" | "B" | "C";
   lastInspection: string;
   incidentsPastYear: number;
   coordinates: [number, number];
-  icon?: string;
 };
 
 type Ticket = {
@@ -71,12 +72,6 @@ function MapView({ areasGeoJson, facilities, tickets, onAreaClick, onFacilityCli
     });
 
     map.on("load", () => {
-      map.on("styleimagemissing", (e) => {
-        const id = e.id;
-        if (map.hasImage(id)) return;
-        addCanvasIcon(map, id, "#e2e8f0", id.substring(0, 1).toUpperCase());
-      });
-
       map.addSource(areaSourceId, {
         type: "geojson",
         data: areasGeoJson,
@@ -116,17 +111,19 @@ function MapView({ areasGeoJson, facilities, tickets, onAreaClick, onFacilityCli
         data: facilitiesToFeatureCollection(facilities),
         promoteId: "id",
       });
+      
+      // Add all facility icons upfront
+      addFacilityIcons(map, facilities);
+      
       map.addLayer({
         id: "facility-icon",
         type: "symbol",
         source: facilitySourceId,
         layout: {
-          "icon-image": ["coalesce", ["get", "icon"], ["concat", "facility-", ["get", "type"]], "marker-15"],
-          "icon-size": 1.25,
+          "icon-image": ["get", "icon_id"],
+          "icon-size": 1.6,
           "icon-allow-overlap": true,
-        },
-        paint: {
-          "icon-color": "#0f172a",
+          "icon-ignore-placement": true,
         },
       });
 
@@ -242,7 +239,8 @@ function facilitiesToFeatureCollection(facilities: Facility[]): GeoJSON.FeatureC
         name: facility.name,
         type: facility.type,
         grade: facility.grade,
-        icon: facility.icon,
+        icon_id: facility.iconEmoji ? `emoji-${facility.id}` : `facility-${facility.type}`,
+        icon_emoji: facility.iconEmoji,
       },
     })),
   };
@@ -254,40 +252,42 @@ function addFacilityIcons(map: Map, facilities: Facility[]) {
     playground: { color: "#16a34a", label: "遊" },
     street_light: { color: "#fbbf24", label: "燈" },
     streetlight: { color: "#fbbf24", label: "燈" },
-    road_hazard: { color: "#f87171", label: "路" },
+    road_hazard: { color: "#f43f5e", label: "路" },
     sidewalk: { color: "#a855f7", label: "行" },
     police_station: { color: "#60a5fa", label: "警" },
     drinking_fountain: { color: "#38bdf8", label: "水" },
     elder_center: { color: "#f97316", label: "老" },
     school_zone: { color: "#eab308", label: "學" },
   };
-  const uniqueTypes = Array.from(new Set(facilities.map((f) => f.type)));
-  uniqueTypes.forEach((type) => {
-    const key = `facility-${type}`;
+
+  // Per-facility icon IDs (emoji override or type-based)
+  facilities.forEach((f) => {
+    const key = f.iconEmoji ? `emoji-${f.id}` : `facility-${f.type}`;
     if (map.hasImage(key)) return;
-    const visual = typeVisuals[type] ?? { color: "#cbd5e1", label: type.slice(0, 1).toUpperCase() };
+    if (f.iconEmoji) {
+      addCanvasIcon(map, key, "#ffffff", f.iconEmoji);
+      return;
+    }
+    const visual = typeVisuals[f.type] ?? { color: "#cbd5e1", label: f.type.slice(0, 1).toUpperCase() };
     addCanvasIcon(map, key, visual.color, visual.label);
   });
 }
 
 function addCanvasIcon(map: Map, id: string, color: string, label: string) {
-  const size = 36;
+  const size = 44;
   const canvas = document.createElement("canvas");
   canvas.width = size;
   canvas.height = size;
   const context = canvas.getContext("2d");
   if (!context) return;
-  context.beginPath();
-  context.arc(size / 2, size / 2, size / 2.4, 0, Math.PI * 2, false);
+  context.clearRect(0, 0, size, size);
+  context.font = "bold 28px sans-serif";
   context.fillStyle = color;
-  context.fill();
-  context.fillStyle = "#0f172a";
-  context.font = "bold 14px sans-serif";
   context.textAlign = "center";
   context.textBaseline = "middle";
-  context.fillText(label, size / 2, size / 2 + 1);
-  const imageData = context.getImageData(0, 0, size, size);
-  map.addImage(id, imageData, { pixelRatio: 2 });
+  context.fillText(label, size / 2, size / 2 + 2);
+  const data = context.getImageData(0, 0, size, size);
+  map.addImage(id, data, { pixelRatio: 2 });
 }
 
 function ticketsToFeatureCollection(tickets: Ticket[]): GeoJSON.FeatureCollection<GeoJSON.Point> {
