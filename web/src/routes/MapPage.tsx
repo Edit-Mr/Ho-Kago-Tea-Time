@@ -15,6 +15,7 @@ import { useUiStore } from "../store/uiStore";
 import PolicyExperimentCard from "../components/PolicyExperimentCard";
 import { useDataStore, type AreaRecord, type TicketRecord } from "../store/dataStore";
 import { deriveTicketStatus } from "../utils/tickets";
+import { type FacilityStatusFilter } from "../store/mapStore";
 
 function MapPage() {
   const { selectedAreaId, selectedFacilityId, selectArea, selectFacility } = useMapStore();
@@ -22,6 +23,7 @@ function MapPage() {
   const toggleRightPanel = useUiStore((s) => s.toggleRightPanel);
   const isRightPanelOpen = useUiStore((s) => s.isRightPanelOpen);
   const { areas, facilities, tickets, ticketEvents, loading, error, loadAll } = useDataStore();
+  const facilityTypesMeta = useDataStore((s) => s.facilityTypes);
 
   useEffect(() => {
     loadAll().catch(() => {
@@ -89,21 +91,49 @@ function MapPage() {
     [areas]
   );
 
+  const uniqueFacilityTypes = useMemo(() => {
+    const metaByType = new Map<string, { type: string; label: string; emoji?: string }>();
+    const list = facilityTypesMeta.length
+      ? facilityTypesMeta.map((t) => ({
+          type: t.type,
+          label: t.labelZh,
+          emoji: t.emoji ?? undefined,
+        }))
+      : facilities.map((f) => ({
+          type: f.type,
+          label: f.typeLabel ?? f.type,
+          emoji: f.typeEmoji ?? undefined,
+        }));
+
+    list.forEach((item) => {
+      if (!metaByType.has(item.type)) {
+        metaByType.set(item.type, item);
+      }
+    });
+    return Array.from(metaByType.values()).sort((a, b) => a.label.localeCompare(b.label));
+  }, [facilityTypesMeta, facilities]);
+
   const mapFacilities = useMemo(
     () =>
       facilities
         .filter((f) => f.coords)
-        .map((f) => ({
-          id: f.id,
-          name: f.name,
-          type: f.type,
-          grade: (f.grade ?? "B") as FacilityCardType["grade"],
-          lastInspection: f.lastInspection?.slice(0, 10) ?? "—",
-          incidentsPastYear: f.incidentsPastYear ?? 0,
-          coordinates: f.coords as [number, number],
-          iconEmoji: f.iconEmoji ?? undefined,
-        })),
-    [facilities]
+        .map((f) => {
+          const relatedTicket = tickets.find((t) => t.facilityId === f.id);
+          const maintenanceStatus = deriveFacilityStatus(f, relatedTicket);
+          return {
+            id: f.id,
+            name: f.name,
+            type: f.type,
+            typeLabel: f.typeLabel ?? f.type,
+            maintenanceStatus,
+            grade: (f.grade ?? "B") as FacilityCardType["grade"],
+            lastInspection: f.lastInspection?.slice(0, 10) ?? "—",
+            incidentsPastYear: f.incidentsPastYear ?? 0,
+            coordinates: f.coords as [number, number],
+            iconEmoji: f.iconEmoji ?? f.typeEmoji ?? undefined,
+          };
+        }),
+    [facilities, tickets]
   );
 
   const mapTickets = useMemo(
@@ -155,7 +185,7 @@ function MapPage() {
           />
           <Button onClick={handleSearch}>搜尋</Button>
         </div>
-        <LayerToggles />
+        <LayerToggles facilityTypes={uniqueFacilityTypes} />
         <PolicyExperimentCard />
         {error && (
           <Card className="border-red-500/40 bg-red-500/10">
@@ -179,7 +209,7 @@ function MapPage() {
           ) : selectedArea ? (
             <AreaCard area={selectedArea} />
           ) : null}
-          <NearbyIssues tickets={tickets} areas={areas} />
+          <NearbyIssues tickets={tickets} areas={areas} selectedAreaId={selectedAreaId} />
         </div>
       )}
 
@@ -208,15 +238,21 @@ function MapPage() {
   );
 }
 
-function NearbyIssues({ tickets, areas }: { tickets: TicketRecord[]; areas: AreaRecord[] }) {
-  const openIssues = tickets.filter((t) => t.status !== "completed" && t.status !== "cancelled").slice(0, 6);
+function NearbyIssues({ tickets, areas, selectedAreaId }: { tickets: TicketRecord[]; areas: AreaRecord[]; selectedAreaId: string }) {
+  const openIssues = tickets
+    .filter((t) => t.status !== "completed" && t.status !== "cancelled")
+    .filter((t) => t.areaId === selectedAreaId)
+    .slice(0, 6);
+  
   if (openIssues.length === 0) {
     return (
       <Card>
         <CardHeader>
           <CardTitle>附近事件</CardTitle>
         </CardHeader>
-        <CardContent className="text-sm text-slate-400">目前沒有開啟中的通報或工單。</CardContent>
+        <CardContent className="text-sm text-slate-400">
+          {selectedAreaId ? "此區域目前沒有開啟中的通報或工單。" : "目前沒有開啟中的通報或工單。"}
+        </CardContent>
       </Card>
     );
   }
@@ -246,3 +282,24 @@ function NearbyIssues({ tickets, areas }: { tickets: TicketRecord[]; areas: Area
 }
 
 export default MapPage;
+
+type MaintenanceStatus = keyof FacilityStatusFilter;
+
+function deriveFacilityStatus(facility: FacilityCardType & { slaDue?: string | undefined }, relatedTicket: TicketRecord | undefined): MaintenanceStatus {
+  if (relatedTicket) {
+    const derived = deriveTicketStatus(relatedTicket);
+    if (derived === "overdue") return "overdue";
+    return "in_progress";
+  }
+  if (!facility.lastInspection || isStaleInspection(facility.lastInspection, 365)) {
+    return "overdue";
+  }
+  return "safe";
+}
+
+function isStaleInspection(lastInspection: string, staleAfterDays: number) {
+  const inspectedAt = new Date(lastInspection).getTime();
+  if (Number.isNaN(inspectedAt)) return true;
+  const diffDays = (Date.now() - inspectedAt) / (1000 * 60 * 60 * 24);
+  return diffDays > staleAfterDays;
+}

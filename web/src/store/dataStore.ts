@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type GeoJSON from "geojson";
-import { fetchAreaRiskSnapshots, fetchAreas, fetchFacilities, fetchFacilityInspections, fetchMissions, fetchTicketEvents, fetchTickets } from "../lib/api";
+import { fetchAreaRiskSnapshots, fetchAreas, fetchFacilities, fetchFacilityInspections, fetchFacilityTypes, fetchMissions, fetchTicketEvents, fetchTickets } from "../lib/api";
 
 export type AreaRecord = {
   id: string;
@@ -15,6 +15,8 @@ export type FacilityRecord = {
   id: string;
   areaId?: string | null;
   type: string;
+  typeLabel?: string;
+  typeEmoji?: string | null;
   name: string;
   iconEmoji?: string | null;
   coords?: [number, number];
@@ -64,6 +66,7 @@ type DataState = {
   ticketEvents: TicketEventRecord[];
   missions: MissionRecord[];
   areaRiskSnapshots: Array<{ areaId: string; riskScore: number; computedAt: string; _computedAtRaw: string }>;
+  facilityTypes: Array<{ type: string; labelZh: string; emoji?: string | null }>;
   loading: boolean;
   error?: string;
   loadAll: () => Promise<void>;
@@ -76,12 +79,13 @@ export const useDataStore = create<DataState>((set) => ({
   ticketEvents: [],
   missions: [],
   areaRiskSnapshots: [],
+  facilityTypes: [],
   loading: false,
   error: undefined,
   loadAll: async () => {
     set({ loading: true, error: undefined });
     try {
-      const [areasRes, riskRes, facilitiesRes, inspectionsRes, ticketsRes, ticketEventsRes, missionsRes] = await Promise.all([
+      const [areasRes, riskRes, facilitiesRes, inspectionsRes, ticketsRes, ticketEventsRes, missionsRes, facilityTypesRes] = await Promise.all([
         fetchAreas(),
         fetchAreaRiskSnapshots(),
         fetchFacilities(),
@@ -89,10 +93,12 @@ export const useDataStore = create<DataState>((set) => ({
         fetchTickets(),
         fetchTicketEvents(),
         fetchMissions(),
+        fetchFacilityTypes(),
       ]);
       if (areasRes.error) throw new Error(areasRes.error);
       if (facilitiesRes.error) throw new Error(facilitiesRes.error);
       if (ticketsRes.error) throw new Error(ticketsRes.error);
+      if (facilityTypesRes.error) throw new Error(facilityTypesRes.error);
 
       const latestRiskByArea = new Map<string, { score: number; at: number }>();
       riskRes.data?.forEach((r) => {
@@ -115,14 +121,20 @@ export const useDataStore = create<DataState>((set) => ({
         }
       });
 
+      const typeMeta = new Map<string, { labelZh: string; emoji?: string | null }>();
+      facilityTypesRes.data?.forEach((t) => typeMeta.set(t.type, { labelZh: t.labelZh, emoji: t.emoji }));
+
       const facilities = facilitiesRes.data?.map((f) => {
         const latestInspection = latestInspectionByFacility.get(f.id);
+        const meta = typeMeta.get(f.type);
         return {
           id: f.id,
           areaId: f.areaId,
           type: f.type,
+          typeLabel: meta?.labelZh ?? undefined,
+          typeEmoji: meta?.emoji ?? null,
           name: f.name,
-          iconEmoji: f.iconEmoji ?? null,
+          iconEmoji: f.iconEmoji ?? meta?.emoji ?? null,
           coords: (f.geom as GeoJSON.Point | undefined)?.coordinates as [number, number] | undefined,
           grade: (f.healthGrade as FacilityRecord["grade"]) ?? undefined,
           lastInspection: latestInspection?.inspectedAt ?? f.lastInspectionAt ?? undefined,
@@ -159,6 +171,7 @@ export const useDataStore = create<DataState>((set) => ({
         areas,
         facilities,
         tickets,
+        facilityTypes: facilityTypesRes.data ?? [],
         ticketEvents: ticketEventsRes.data ?? [],
         missions: missionsRes.data ?? [],
         areaRiskSnapshots: riskRes.data ?? [],

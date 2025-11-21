@@ -3,6 +3,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 
 type LayerKey = keyof MapStore["activeLayers"];
+type LayerTogglesProps = {
+  facilityTypes: Array<{ type: string; label: string; emoji?: string }>;
+};
 
 const scenarioPresets: Array<{ id: Scenario; title: string; description: string; highlights: string[] }> = [
   {
@@ -44,11 +47,16 @@ const layerLabels: Record<LayerKey, string> = {
   heatmap: "風險熱區",
 };
 
-function LayerToggles() {
+function LayerToggles({ facilityTypes }: LayerTogglesProps) {
   const activeLayers = useMapStore((s) => s.activeLayers);
   const toggleLayer = useMapStore((s) => s.toggleLayer);
   const selectedScenario = useMapStore((s) => s.selectedScenario);
   const setScenario = useMapStore((s) => s.setScenario);
+  const facilityTypeFilter = useMapStore((s) => s.facilityTypeFilter);
+  const toggleFacilityType = useMapStore((s) => s.toggleFacilityType);
+  const resetFacilityTypeFilter = useMapStore((s) => s.resetFacilityTypeFilter);
+  const facilityStatusFilter = useMapStore((s) => s.facilityStatusFilter);
+  const toggleFacilityStatus = useMapStore((s) => s.toggleFacilityStatus);
 
   return (
     <Card>
@@ -98,6 +106,79 @@ function LayerToggles() {
             </Button>
           </div>
         ))}
+        <div className="space-y-2 pt-1">
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-slate-400">設施狀態</p>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                toggleFacilityStatus("safe", true);
+                toggleFacilityStatus("in_progress", true);
+                toggleFacilityStatus("overdue", true);
+              }}
+            >
+              全部
+            </Button>
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {[
+              { id: "safe", label: "已檢查安全", tone: "emerald" },
+              { id: "in_progress", label: "修復中", tone: "amber" },
+              { id: "overdue", label: "逾期/未檢測", tone: "red" },
+            ].map(({ id, label, tone }) => {
+              const active = facilityStatusFilter[id as keyof typeof facilityStatusFilter];
+              const colors =
+                tone === "emerald"
+                  ? active
+                    ? "bg-emerald-500/20 text-emerald-100 border border-emerald-500/40"
+                    : "bg-slate-800 text-slate-200 border border-slate-700"
+                  : tone === "amber"
+                  ? active
+                    ? "bg-amber-500/20 text-amber-100 border border-amber-500/40"
+                    : "bg-slate-800 text-slate-200 border border-slate-700"
+                  : active
+                  ? "bg-red-500/20 text-red-100 border border-red-500/40"
+                  : "bg-slate-800 text-slate-200 border border-slate-700";
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => toggleFacilityStatus(id as keyof typeof facilityStatusFilter)}
+                  className={`px-2 py-1 rounded-full text-[11px] transition ${colors}`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-slate-400">設施類型</p>
+            <Button variant="secondary" onClick={resetFacilityTypeFilter}>
+              全部
+            </Button>
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {facilityTypes.map(({ type, label, emoji }) => {
+              const active = facilityTypeFilter.length === 0 || facilityTypeFilter.includes(type);
+              const text = `${emoji ? `${emoji} ` : ""}${label}`;
+              return (
+                <button
+                  key={type}
+                  type="button"
+                  onClick={() => toggleFacilityType(type)}
+                  className={`px-2 py-1 rounded-full text-[11px] border transition ${
+                    active ? "bg-brand-500/15 text-brand-50 border-brand-400/50" : "bg-slate-800 text-slate-200 border border-slate-700"
+                  }`}
+                >
+                  {text}
+                </button>
+              );
+            })}
+            {facilityTypes.length === 0 && <p className="text-xs text-slate-500">尚無設施類型</p>}
+          </div>
+        </div>
       </CardContent>
     </Card>
   );

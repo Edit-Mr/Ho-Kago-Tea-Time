@@ -42,6 +42,31 @@ create table if not exists public.facilities (
 create index if not exists facilities_geom_idx on public.facilities using gist (geom);
 create index if not exists facilities_area_idx on public.facilities (area_id);
 
+-- FACILITY TYPE META (single source of truth for labels & emoji)
+create table if not exists public.facility_type_meta (
+  type text primary key,
+  label_zh text not null,
+  emoji text,
+  created_at timestamptz default now()
+);
+insert into public.facility_type_meta (type, label_zh, emoji) values
+  ('park','公園','🌳'),
+  ('playground','遊戲場','🛝'),
+  ('street_light','路燈','💡'),
+  ('streetlight','路燈','💡'),
+  ('police_station','警察局','🚓'),
+  ('sidewalk','人行道','🚶'),
+  ('road_hazard','道路坑洞','⚠️'),
+  ('drinking_fountain','飲水機','🚰'),
+  ('elder_center','樂齡中心','🧓'),
+  ('school_zone','校園周邊','🏫'),
+  ('tree','樹木','🌲'),
+  ('toilet','公廁','🚻'),
+  ('other','其他','📍')
+on conflict (type) do update set
+  label_zh = excluded.label_zh,
+  emoji = excluded.emoji;
+
 -- FACILITY INSPECTIONS
 create table if not exists public.facility_inspections (
   id uuid primary key default gen_random_uuid(),

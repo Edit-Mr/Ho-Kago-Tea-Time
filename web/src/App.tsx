@@ -20,15 +20,15 @@ function App() {
             CM
           </div>
           <div>
-            <p className="text-lg font-semibold">Civic Maintenance Radar</p>
-            <p className="text-sm text-slate-400">Heatmaps, risks, and missions</p>
+            <p className="text-lg font-semibold">新竹政策雷達</p>
+            <p className="text-sm text-slate-400">熱力圖、風險與任務</p>
           </div>
         </div>
         <nav className="flex items-center gap-3 text-sm font-medium">
-          <NavLink to="/">Map</NavLink>
-          <NavLink to="/dashboard/demo-area">Dashboard</NavLink>
-          <NavLink to="/admin">Admin</NavLink>
-          <NavLink to="/missions">Missions</NavLink>
+          <NavLink to="/">地圖</NavLink>
+          <NavLink to="/dashboard/demo-area">儀表板</NavLink>
+          <NavLink to="/admin">管理員</NavLink>
+          <NavLink to="/missions">任務強</NavLink>
         </nav>
       </header>
 

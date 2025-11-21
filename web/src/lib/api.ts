@@ -105,6 +105,19 @@ export async function fetchFacilities(): Promise<ApiResult<Array<{ id: string; a
   };
 }
 
+export async function fetchFacilityTypes(): Promise<ApiResult<Array<{ type: string; labelZh: string; emoji?: string | null }>>> {
+  if (!supabase) return { error: "Supabase 環境變數未設定" };
+  const { data, error } = await supabase.from("facility_type_meta").select("type,label_zh,emoji");
+  if (error) return { error: error.message };
+  return {
+    data: data?.map((row) => ({
+      type: row.type,
+      labelZh: row.label_zh,
+      emoji: row.emoji,
+    })),
+  };
+}
+
 export async function fetchFacilityInspections(): Promise<ApiResult<Array<{ facilityId: string; inspectedAt: string; incidentCountLastYear?: number | null; notes?: string | null }>>> {
   if (!supabase) return { error: "Supabase 環境變數未設定" };
   const { data, error } = await supabase

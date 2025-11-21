@@ -8,11 +8,13 @@ type Facility = {
   id: string;
   name: string;
   type: string;
+  typeLabel?: string;
   iconEmoji?: string | null;
   grade: "A" | "B" | "C";
   lastInspection: string;
   incidentsPastYear: number;
   coordinates: [number, number];
+  maintenanceStatus: "safe" | "in_progress" | "overdue";
 };
 
 type Ticket = {
@@ -44,6 +46,8 @@ function MapView({ areasGeoJson, facilities, tickets, onAreaClick, onFacilityCli
   const viewport = useMapStore((s) => s.viewport);
   const setViewport = useMapStore((s) => s.setViewport);
   const activeLayers = useMapStore((s) => s.activeLayers);
+  const facilityTypeFilter = useMapStore((s) => s.facilityTypeFilter);
+  const facilityStatusFilter = useMapStore((s) => s.facilityStatusFilter);
 
   clickAreaRef.current = onAreaClick;
   clickFacilityRef.current = onFacilityClick;
@@ -106,14 +110,15 @@ function MapView({ areasGeoJson, facilities, tickets, onAreaClick, onFacilityCli
         },
       });
 
+      const filteredFacilitiesOnLoad = filteredFacilities(facilities, facilityTypeFilter, facilityStatusFilter);
       map.addSource(facilitySourceId, {
         type: "geojson",
-        data: facilitiesToFeatureCollection(facilities),
+        data: facilitiesToFeatureCollection(filteredFacilitiesOnLoad),
         promoteId: "id",
       });
       
       // Add all facility icons upfront
-      addFacilityIcons(map, facilities);
+      addFacilityIcons(map, filteredFacilitiesOnLoad);
       
       map.addLayer({
         id: "facility-icon",
@@ -197,14 +202,15 @@ function MapView({ areasGeoJson, facilities, tickets, onAreaClick, onFacilityCli
   useEffect(() => {
     const map = mapRef.current;
     if (!map?.isStyleLoaded()) return;
-    addFacilityIcons(map, facilities);
+    const filtered = filteredFacilities(facilities, facilityTypeFilter, facilityStatusFilter);
+    addFacilityIcons(map, filtered);
     const areaSource = map.getSource(areaSourceId) as mapboxgl.GeoJSONSource | undefined;
     if (areaSource) areaSource.setData(areasGeoJson);
     const facilitySource = map.getSource(facilitySourceId) as mapboxgl.GeoJSONSource | undefined;
-    if (facilitySource) facilitySource.setData(facilitiesToFeatureCollection(facilities));
+    if (facilitySource) facilitySource.setData(facilitiesToFeatureCollection(filtered));
     const ticketSource = map.getSource(ticketSourceId) as mapboxgl.GeoJSONSource | undefined;
     if (ticketSource) ticketSource.setData(ticketsToFeatureCollection(tickets));
-  }, [areasGeoJson, facilities, tickets]);
+  }, [areasGeoJson, facilities, tickets, facilityTypeFilter, facilityStatusFilter]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -239,37 +245,45 @@ function facilitiesToFeatureCollection(facilities: Facility[]): GeoJSON.FeatureC
         name: facility.name,
         type: facility.type,
         grade: facility.grade,
-        icon_id: facility.iconEmoji ? `emoji-${facility.id}` : `facility-${facility.type}`,
+        icon_id: facility.iconEmoji ? `emoji-${facility.id}` : `facility-${facility.type}-${facility.maintenanceStatus}`,
         icon_emoji: facility.iconEmoji,
+        status: facility.maintenanceStatus,
       },
     })),
   };
 }
 
 function addFacilityIcons(map: Map, facilities: Facility[]) {
-  const typeVisuals: Record<string, { color: string; label: string }> = {
-    park: { color: "#22c55e", label: "P" },
-    playground: { color: "#16a34a", label: "遊" },
-    street_light: { color: "#fbbf24", label: "燈" },
-    streetlight: { color: "#fbbf24", label: "燈" },
-    road_hazard: { color: "#f43f5e", label: "路" },
-    sidewalk: { color: "#a855f7", label: "行" },
-    police_station: { color: "#60a5fa", label: "警" },
-    drinking_fountain: { color: "#38bdf8", label: "水" },
-    elder_center: { color: "#f97316", label: "老" },
-    school_zone: { color: "#eab308", label: "學" },
+  const typeVisuals: Record<string, { label: string }> = {
+    park: { label: "P" },
+    playground: { label: "遊" },
+    street_light: { label: "燈" },
+    streetlight: { label: "燈" },
+    road_hazard: { label: "路" },
+    sidewalk: { label: "行" },
+    police_station: { label: "警" },
+    drinking_fountain: { label: "水" },
+    elder_center: { label: "老" },
+    school_zone: { label: "學" },
+  };
+
+  const statusColors: Record<Facility["maintenanceStatus"], string> = {
+    safe: "#22c55e",
+    in_progress: "#fbbf24",
+    overdue: "#ef4444",
   };
 
   // Per-facility icon IDs (emoji override or type-based)
   facilities.forEach((f) => {
-    const key = f.iconEmoji ? `emoji-${f.id}` : `facility-${f.type}`;
+    const key = f.iconEmoji ? `emoji-${f.id}` : `facility-${f.type}-${f.maintenanceStatus}`;
     if (map.hasImage(key)) return;
     if (f.iconEmoji) {
       addCanvasIcon(map, key, "#ffffff", f.iconEmoji);
       return;
     }
-    const visual = typeVisuals[f.type] ?? { color: "#cbd5e1", label: f.type.slice(0, 1).toUpperCase() };
-    addCanvasIcon(map, key, visual.color, visual.label);
+    const visual = typeVisuals[f.type] ?? { label: f.type.slice(0, 1).toUpperCase() };
+    const color = statusColors[f.maintenanceStatus] ?? "#cbd5e1";
+    addCanvasIcon(map, key, color, visual.label);
   });
 }
 
@@ -305,6 +319,14 @@ function ticketsToFeatureCollection(tickets: Ticket[]): GeoJSON.FeatureCollectio
       },
     })),
   };
+}
+
+function filteredFacilities(facilities: Facility[], typeFilter: string[], statusFilter: { safe: boolean; in_progress: boolean; overdue: boolean }) {
+  return facilities.filter((f) => {
+    const typePass = typeFilter.length === 0 || typeFilter.includes(f.type);
+    const statusPass = statusFilter[f.maintenanceStatus];
+    return typePass && statusPass;
+  });
 }
 
 export default MapView;

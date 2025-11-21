@@ -15,6 +15,12 @@ type LayerToggles = {
   heatmap: boolean;
 };
 
+export type FacilityStatusFilter = {
+  safe: boolean;
+  in_progress: boolean;
+  overdue: boolean;
+};
+
 type MapState = {
   viewport: {
     center: mapboxgl.LngLatLike;
@@ -25,6 +31,8 @@ type MapState = {
   activeLayers: LayerToggles;
   selectedFacilityId?: string;
   selectedAreaId?: string;
+  facilityTypeFilter: string[];
+  facilityStatusFilter: FacilityStatusFilter;
 };
 
 type MapActions = {
@@ -33,6 +41,9 @@ type MapActions = {
   toggleLayer: (key: keyof LayerToggles, value?: boolean) => void;
   selectFacility: (id?: string) => void;
   selectArea: (id?: string) => void;
+  toggleFacilityType: (type: string) => void;
+  toggleFacilityStatus: (status: keyof FacilityStatusFilter, value?: boolean) => void;
+  resetFacilityTypeFilter: () => void;
 };
 
 export type MapStore = MapState & MapActions;
@@ -58,6 +69,8 @@ export const useMapStore = create<MapStore>((set) => ({
   activeLayers: defaultLayers,
   selectedFacilityId: undefined,
   selectedAreaId: undefined,
+  facilityTypeFilter: [],
+  facilityStatusFilter: { safe: true, in_progress: true, overdue: true },
   setViewport: (viewport) => set({ viewport }),
   setScenario: (selectedScenario) =>
     set((state) => ({
@@ -72,4 +85,15 @@ export const useMapStore = create<MapStore>((set) => ({
     }),
   selectFacility: (selectedFacilityId) => set({ selectedFacilityId }),
   selectArea: (selectedAreaId) => set({ selectedAreaId }),
+  toggleFacilityType: (type) =>
+    set((state) => {
+      const hasType = state.facilityTypeFilter.includes(type);
+      const next = hasType ? state.facilityTypeFilter.filter((t) => t !== type) : [...state.facilityTypeFilter, type];
+      return { facilityTypeFilter: next };
+    }),
+  toggleFacilityStatus: (status, value) =>
+    set((state) => ({
+      facilityStatusFilter: { ...state.facilityStatusFilter, [status]: value ?? !state.facilityStatusFilter[status] },
+    })),
+  resetFacilityTypeFilter: () => set({ facilityTypeFilter: [] }),
 }));

@@ -8,6 +8,8 @@ export type Facility = {
   id: string;
   name: string;
   type: string;
+  typeLabel?: string;
+  typeEmoji?: string | null;
   address?: string;
   lastInspection: string;
   grade: "A" | "B" | "C";
@@ -46,7 +48,10 @@ function FacilityCard({ facility }: { facility: Facility }) {
       <CardHeader>
         <div>
           <CardTitle>{facility.name}</CardTitle>
-          <p className="text-xs text-slate-400 capitalize">{typeLabels[facility.type] ?? facility.type}</p>
+          <p className="text-xs text-slate-400 capitalize">
+            {facility.typeEmoji ? `${facility.typeEmoji} ` : ""}
+            {facility.typeLabel ?? typeLabels[facility.type] ?? facility.type}
+          </p>
         </div>
         <Badge variant={gradeColors[facility.grade].badge}>
           {gradeColors[facility.grade].label}
