@@ -1,5 +1,5 @@
 packages:
-  - fetch-problem
+  - "fetch-problem/*"
   - web
 
 onlyBuiltDependencies:

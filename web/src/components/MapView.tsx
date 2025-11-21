@@ -1,15 +1,17 @@
-import { useEffect, useRef } from "react";
+import { createElement, useEffect, useRef, type FC } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import mapboxgl, { type Map } from "mapbox-gl";
 import type GeoJSON from "geojson";
 import { configureMapbox } from "../lib/mapbox";
 import { useMapStore } from "../store/mapStore";
+import { icons as lucideIcons, type LucideProps } from "lucide-react";
 
 type Facility = {
   id: string;
   name: string;
   type: string;
   typeLabel?: string;
-  iconEmoji?: string | null;
+  iconName?: string;
   grade: "A" | "B" | "C";
   lastInspection: string;
   incidentsPastYear: number;
@@ -43,11 +45,11 @@ function MapView({ areasGeoJson, facilities, tickets, onAreaClick, onFacilityCli
   const clickFacilityRef = useRef<typeof onFacilityClick>();
   const clickTicketRef = useRef<typeof onTicketClick>();
   const setViewportRef = useRef<ReturnType<typeof useMapStore.getState>["setViewport"]>();
-  const viewport = useMapStore((s) => s.viewport);
-  const setViewport = useMapStore((s) => s.setViewport);
-  const activeLayers = useMapStore((s) => s.activeLayers);
-  const facilityTypeFilter = useMapStore((s) => s.facilityTypeFilter);
-  const facilityStatusFilter = useMapStore((s) => s.facilityStatusFilter);
+  const viewport = useMapStore(s => s.viewport);
+  const setViewport = useMapStore(s => s.setViewport);
+  const activeLayers = useMapStore(s => s.activeLayers);
+  const facilityTypeFilter = useMapStore(s => s.facilityTypeFilter);
+  const facilityStatusFilter = useMapStore(s => s.facilityStatusFilter);
 
   clickAreaRef.current = onAreaClick;
   clickFacilityRef.current = onFacilityClick;
@@ -63,6 +65,10 @@ function MapView({ areasGeoJson, facilities, tickets, onAreaClick, onFacilityCli
       style: "mapbox://styles/mapbox/dark-v11",
       center: viewport.center,
       zoom: viewport.zoom,
+      maxBounds: [
+        [119.0, 20.0],
+        [123.5, 26.5]
+      ]
     });
     mapRef.current = map;
 
@@ -71,7 +77,7 @@ function MapView({ areasGeoJson, facilities, tickets, onAreaClick, onFacilityCli
       setViewportRef.current?.({
         center: [center.lng, center.lat],
         zoom: map.getZoom(),
-        bounds: map.getBounds().toArray() as mapboxgl.LngLatBoundsLike,
+        bounds: map.getBounds().toArray() as mapboxgl.LngLatBoundsLike
       });
     });
 
@@ -79,26 +85,16 @@ function MapView({ areasGeoJson, facilities, tickets, onAreaClick, onFacilityCli
       map.addSource(areaSourceId, {
         type: "geojson",
         data: areasGeoJson,
-        promoteId: "id",
+        promoteId: "id"
       });
       map.addLayer({
         id: "areas-fill",
         type: "fill",
         source: areaSourceId,
         paint: {
-          "fill-color": [
-            "interpolate",
-            ["linear"],
-            ["get", "risk"],
-            0,
-            "#10b981",
-            40,
-            "#f59e0b",
-            70,
-            "#ef4444",
-          ],
-          "fill-opacity": 0.35,
-        },
+          "fill-color": ["interpolate", ["linear"], ["get", "risk"], 0, "#10b981", 40, "#f59e0b", 70, "#ef4444"],
+          "fill-opacity": 0.35
+        }
       });
       map.addLayer({
         id: "areas-outline",
@@ -106,15 +102,15 @@ function MapView({ areasGeoJson, facilities, tickets, onAreaClick, onFacilityCli
         source: areaSourceId,
         paint: {
           "line-color": "#93c5fd",
-          "line-width": 1.2,
-        },
+          "line-width": 1.2
+        }
       });
 
       const filteredFacilitiesOnLoad = filteredFacilities(facilities, facilityTypeFilter, facilityStatusFilter);
       map.addSource(facilitySourceId, {
         type: "geojson",
         data: facilitiesToFeatureCollection(filteredFacilitiesOnLoad),
-        promoteId: "id",
+        promoteId: "id"
       });
 
       // Add all facility icons upfront
@@ -128,56 +124,40 @@ function MapView({ areasGeoJson, facilities, tickets, onAreaClick, onFacilityCli
           "icon-image": ["get", "icon_id"],
           "icon-size": 1.6,
           "icon-allow-overlap": true,
-          "icon-ignore-placement": true,
-        },
+          "icon-ignore-placement": true
+        }
       });
 
       map.addSource(ticketSourceId, {
         type: "geojson",
         data: ticketsToFeatureCollection(tickets),
-        promoteId: "id",
+        promoteId: "id"
       });
       map.addLayer({
         id: "tickets",
         type: "symbol",
         source: ticketSourceId,
         layout: {
-          "icon-image": [
-            "match",
-            ["get", "status"],
-            "overdue",
-            "marker-15",
-            "within_sla",
-            "triangle-15",
-            "circle-15",
-          ],
+          "icon-image": ["match", ["get", "status"], "overdue", "marker-15", "within_sla", "triangle-15", "circle-15"],
           "icon-size": 1,
-          "icon-allow-overlap": true,
+          "icon-allow-overlap": true
         },
         paint: {
-          "icon-color": [
-            "match",
-            ["get", "status"],
-            "overdue",
-            "#ef4444",
-            "within_sla",
-            "#f59e0b",
-            "#eab308",
-          ],
-        },
+          "icon-color": ["match", ["get", "status"], "overdue", "#ef4444", "within_sla", "#f59e0b", "#eab308"]
+        }
       });
 
-      map.on("click", (e) => {
+      map.on("click", e => {
         const features = map.queryRenderedFeatures(e.point, {
-          layers: ["facility-icon", "tickets", "areas-fill"],
+          layers: ["facility-icon", "tickets", "areas-fill"]
         });
 
         if (!features.length) return;
 
         // Prioritize icons over areas
-        const facilityFeature = features.find((f) => f.layer.id === "facility-icon");
-        const ticketFeature = features.find((f) => f.layer.id === "tickets");
-        const areaFeature = features.find((f) => f.layer.id === "areas-fill");
+        const facilityFeature = features.find(f => f.layer.id === "facility-icon");
+        const ticketFeature = features.find(f => f.layer.id === "tickets");
+        const areaFeature = features.find(f => f.layer.id === "areas-fill");
 
         if (facilityFeature) {
           const id = facilityFeature.id ?? facilityFeature.properties?.id;
@@ -204,7 +184,7 @@ function MapView({ areasGeoJson, facilities, tickets, onAreaClick, onFacilityCli
         }
       });
 
-      ["facility-icon", "tickets", "areas-fill"].forEach((layerId) => {
+      ["facility-icon", "tickets", "areas-fill"].forEach(layerId => {
         map.on("mouseenter", layerId, () => {
           map.getCanvas().style.cursor = "pointer";
         });
@@ -241,10 +221,10 @@ function MapView({ areasGeoJson, facilities, tickets, onAreaClick, onFacilityCli
       areas: ["areas-fill", "areas-outline"],
       facilities: ["facility-icon"],
       tickets: ["tickets"],
-      heatmap: ["areas-fill"],
+      heatmap: ["areas-fill"]
     };
     Object.entries(layers).forEach(([key, ids]) => {
-      ids.forEach((id) => {
+      ids.forEach(id => {
         if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", activeLayers[key as keyof typeof activeLayers] ? "visible" : "none");
       });
     });
@@ -256,97 +236,80 @@ function MapView({ areasGeoJson, facilities, tickets, onAreaClick, onFacilityCli
 function facilitiesToFeatureCollection(facilities: Facility[]): GeoJSON.FeatureCollection<GeoJSON.Point> {
   return {
     type: "FeatureCollection",
-    features: facilities.map((facility) => ({
+    features: facilities.map(facility => ({
       type: "Feature",
       id: facility.id,
       geometry: {
         type: "Point",
-        coordinates: facility.coordinates,
+        coordinates: facility.coordinates
       },
-      properties: {
-        id: facility.id,
-        name: facility.name,
-        type: facility.type,
-        grade: facility.grade,
-        icon_id: facility.iconEmoji ? `emoji-${facility.id}` : `facility-${facility.type}-${facility.maintenanceStatus}`,
-        icon_emoji: facility.iconEmoji,
-        status: facility.maintenanceStatus,
-      },
-    })),
+        properties: {
+          id: facility.id,
+          name: facility.name,
+          type: facility.type,
+          grade: facility.grade,
+          icon_id: facility.iconName ? `lucide-${facility.iconName}-${facility.grade}` : `facility-${facility.type}-${facility.grade}`,
+          status: facility.maintenanceStatus
+        }
+    }))
   };
 }
 
 function addFacilityIcons(map: Map, facilities: Facility[]) {
-  const typeVisuals: Record<string, { label: string }> = {
-    park: { label: "P" },
-    playground: { label: "遊" },
-    street_light: { label: "燈" },
-    streetlight: { label: "燈" },
-    road_hazard: { label: "路" },
-    sidewalk: { label: "行" },
-    police_station: { label: "警" },
-    drinking_fountain: { label: "水" },
-    elder_center: { label: "老" },
-    school_zone: { label: "學" },
-  };
-
   const statusColors: Record<Facility["maintenanceStatus"], string> = {
     safe: "#22c55e",
     in_progress: "#fbbf24",
-    overdue: "#ef4444",
+    overdue: "#ef4444"
+  };
+  const gradeColors: Record<Facility["grade"], string> = {
+    A: "#22c55e",
+    B: "#f59e0b",
+    C: "#ef4444"
   };
 
-  // Per-facility icon IDs (emoji override or type-based)
-  facilities.forEach((f) => {
-    const key = f.iconEmoji ? `emoji-${f.id}` : `facility-${f.type}-${f.maintenanceStatus}`;
-    if (map.hasImage(key)) return;
-    if (f.iconEmoji) {
-      addCanvasIcon(map, key, "#ffffff", f.iconEmoji);
-      return;
-    }
-    const visual = typeVisuals[f.type] ?? { label: f.type.slice(0, 1).toUpperCase() };
-    const color = statusColors[f.maintenanceStatus] ?? "#cbd5e1";
-    addCanvasIcon(map, key, color, visual.label);
+  facilities.forEach(f => {
+    const iconKey = f.iconName ? `lucide-${f.iconName}-${f.grade}` : `facility-${f.type}-${f.grade}`;
+    if (map.hasImage(iconKey)) return;
+    const color = gradeColors[f.grade] ?? statusColors[f.maintenanceStatus] ?? "#cbd5e1";
+    addLucideIcon(map, iconKey, color, f.iconName);
   });
 }
 
-function addCanvasIcon(map: Map, id: string, color: string, label: string) {
-  const size = 44;
-  const canvas = document.createElement("canvas");
-  canvas.width = size;
-  canvas.height = size;
-  const context = canvas.getContext("2d");
-  if (!context) return;
-  context.clearRect(0, 0, size, size);
-  context.font = "bold 28px sans-serif";
-  context.fillStyle = color;
-  context.textAlign = "center";
-  context.textBaseline = "middle";
-  context.fillText(label, size / 2, size / 2 + 2);
-  const data = context.getImageData(0, 0, size, size);
-  map.addImage(id, data, { pixelRatio: 2 });
+function addLucideIcon(map: Map, id: string, colorHex: string, iconName?: string) {
+  const iconsRecord = lucideIcons as Record<string, FC<LucideProps>>;
+  const IconComponent = iconName ? iconsRecord[iconName] : undefined;
+  const svgMarkup = IconComponent
+    ? renderToStaticMarkup(createElement(IconComponent, { color: colorHex, size: 44, strokeWidth: 2 }))
+    : `<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="${colorHex}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" /></svg>`;
+  const encoded = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgMarkup)}`;
+
+  map.loadImage(encoded, (error, image) => {
+    if (error || !image) return;
+    if (map.hasImage(id)) return;
+    map.addImage(id, image);
+  });
 }
 
 function ticketsToFeatureCollection(tickets: Ticket[]): GeoJSON.FeatureCollection<GeoJSON.Point> {
   return {
     type: "FeatureCollection",
-    features: tickets.map((ticket) => ({
+    features: tickets.map(ticket => ({
       type: "Feature",
       id: ticket.id,
       geometry: {
         type: "Point",
-        coordinates: ticket.coordinates,
+        coordinates: ticket.coordinates
       },
       properties: {
         id: ticket.id,
-        status: ticket.status,
-      },
-    })),
+        status: ticket.status
+      }
+    }))
   };
 }
 
 function filteredFacilities(facilities: Facility[], typeFilter: string[], statusFilter: { safe: boolean; in_progress: boolean; overdue: boolean }) {
-  return facilities.filter((f) => {
+  return facilities.filter(f => {
     const typePass = typeFilter.length === 0 || typeFilter.includes(f.type);
     const statusPass = statusFilter[f.maintenanceStatus];
     return typePass && statusPass;

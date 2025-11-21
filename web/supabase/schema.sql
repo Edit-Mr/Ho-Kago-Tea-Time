@@ -6,24 +6,32 @@ create extension if not exists postgis;
 -- AREAS
 create table if not exists public.areas (
   id uuid primary key default gen_random_uuid(),
+
+  -- 原本 name 仍保留（完整顯示）
   name text not null,
+
+  -- 行政代碼（里代碼、或自訂的區代碼）
   code text unique,
+
+  -- 新增行政區層級
+  level text not null check (level in ('village','district')),
+
+  -- 新增拆解欄位（搜尋會爽到不行）
+  county text,        -- 新北市、台中市…
+  town text,          -- 板橋區、大安區、深坑鄉…
+  village text,       -- 某某里（district 時為 NULL）
+
+  -- 幾何
   geom geometry(MultiPolygon,4326) not null,
   centroid geometry(Point,4326) generated always as (st_centroid(geom)) stored,
+
   population_total int,
   created_at timestamptz default now()
 );
-create index if not exists areas_geom_idx on public.areas using gist (geom);
 
--- POPULATION
-create table if not exists public.population_stats (
-  area_id uuid references public.areas(id) on delete cascade,
-  year int not null,
-  population_total int,
-  population_children_0_14 int,
-  population_elderly_65_plus int,
-  primary key (area_id, year)
-);
+-- 空間索引
+create index if not exists areas_geom_idx on public.areas using gist (geom);
+create index if not exists areas_county_idx on public.areas (county, town, village);
 
 -- FACILITIES
 create table if not exists public.facilities (
@@ -31,41 +39,52 @@ create table if not exists public.facilities (
   area_id uuid references public.areas(id) on delete set null,
   type text not null check (type in ('park','playground','street_light','tree','toilet','other','road_hazard','police_station','sidewalk','drinking_fountain','elder_center','school_zone')),
   name text not null,
-  icon text,
   geom geometry(Point,4326) not null,
-  footprint geometry(Polygon,4326),
   health_grade text check (health_grade in ('A','B','C')),
-  last_inspection_at timestamptz,
-  has_open_ticket boolean default false,
-  created_at timestamptz default now()
+  last_inspection_at timestamptz
 );
 create index if not exists facilities_geom_idx on public.facilities using gist (geom);
 create index if not exists facilities_area_idx on public.facilities (area_id);
+
+-- Helper to select facilities inside a given area (including null area_id but spatially inside)
+create or replace function public.facilities_in_area(target_area_id uuid)
+returns setof public.facilities
+language sql
+stable
+as $$
+  select f.*
+  from public.facilities f
+  join public.areas a on a.id = target_area_id
+  where f.area_id = target_area_id
+     or (f.area_id is null and st_within(f.geom, a.geom));
+$$;
 
 -- FACILITY TYPE META (single source of truth for labels & emoji)
 create table if not exists public.facility_type_meta (
   type text primary key,
   label_zh text not null,
   emoji text,
+  icon_name text,
   created_at timestamptz default now()
 );
-insert into public.facility_type_meta (type, label_zh, emoji) values
-  ('park','公園','🌳'),
-  ('playground','遊戲場','🛝'),
-  ('street_light','路燈','💡'),
-  ('streetlight','路燈','💡'),
-  ('police_station','警察局','🚓'),
-  ('sidewalk','人行道','🚶'),
-  ('road_hazard','道路坑洞','⚠️'),
-  ('drinking_fountain','飲水機','🚰'),
-  ('elder_center','樂齡中心','🧓'),
-  ('school_zone','校園周邊','🏫'),
-  ('tree','樹木','🌲'),
-  ('toilet','公廁','🚻'),
-  ('other','其他','📍')
+insert into public.facility_type_meta (type, label_zh, emoji, icon_name) values
+  ('park','公園','🌳','TreePine'),
+  ('playground','遊戲場','🛝','Play'),
+  ('street_light','路燈','💡','LampWallDown'),
+  ('streetlight','路燈','💡','LampWallDown'),
+  ('police_station','警察局','🚓','Shield'),
+  ('sidewalk','人行道','🚶','Route'),
+  ('road_hazard','道路坑洞','⚠️','AlertTriangle'),
+  ('drinking_fountain','飲水機','🚰','CupSoda'),
+  ('elder_center','樂齡中心','🧓','HeartHandshake'),
+  ('school_zone','校園周邊','🏫','School'),
+  ('tree','樹木','🌲','TreePine'),
+  ('toilet','公廁','🚻','Toilet'),
+  ('other','其他','📍','MapPin')
 on conflict (type) do update set
   label_zh = excluded.label_zh,
-  emoji = excluded.emoji;
+  emoji = excluded.emoji,
+  icon_name = excluded.icon_name;
 
 -- FACILITY INSPECTIONS
 create table if not exists public.facility_inspections (
@@ -106,6 +125,18 @@ create index if not exists tickets_area_idx on public.tickets (area_id);
 create index if not exists tickets_facility_idx on public.tickets (facility_id);
 create index if not exists tickets_status_idx on public.tickets (status);
 
+create or replace function public.tickets_in_area(target_area_id uuid)
+returns setof public.tickets
+language sql
+stable
+as $$
+  select t.*
+  from public.tickets t
+  join public.areas a on a.id = target_area_id
+  where t.area_id = target_area_id
+     or (t.area_id is null and t.geom is not null and st_within(t.geom, a.geom));
+$$;
+
 -- TICKET EVENTS
 create table if not exists public.ticket_events (
   id uuid primary key default gen_random_uuid(),
@@ -126,52 +157,33 @@ create table if not exists public.area_risk_snapshots (
 );
 create index if not exists area_risk_snapshots_idx on public.area_risk_snapshots (area_id, computed_at desc);
 
--- MISSIONS
-create table if not exists public.missions (
-  id uuid primary key default gen_random_uuid(),
-  area_id uuid references public.areas(id) on delete set null,
-  facility_id uuid references public.facilities(id) on delete set null,
-  title text not null,
-  description text,
-  type text,
-  status text not null check (status in ('open','completed','expired')),
-  created_at timestamptz default now(),
-  due_at timestamptz
-);
-create index if not exists missions_area_idx on public.missions (area_id);
-create index if not exists missions_facility_idx on public.missions (facility_id);
-
--- MISSION REPORTS
-create table if not exists public.mission_reports (
-  id uuid primary key default gen_random_uuid(),
-  mission_id uuid references public.missions(id) on delete cascade,
-  facility_id uuid references public.facilities(id) on delete set null,
-  created_at timestamptz default now(),
-  status text not null check (status in ('ok','issue_found')),
-  notes text,
-  photo_url text
-);
-create index if not exists mission_reports_mission_idx on public.mission_reports (mission_id, created_at);
-
 -- SEED EXAMPLE DATA (optional; remove in prod)
-insert into public.areas (id, name, code, geom, population_total)
-values
-  ('00000000-0000-0000-0000-000000000001','西屯區','xitun', st_geomfromtext('MULTIPOLYGON(((120.624 24.192,120.664 24.192,120.664 24.143,120.624 24.143,120.624 24.192)))',4326), 220000),
-  ('00000000-0000-0000-0000-000000000002','北區','north', st_geomfromtext('MULTIPOLYGON(((120.683 24.173,120.715 24.173,120.715 24.15,120.683 24.15,120.683 24.173)))',4326), 140000),
-  ('00000000-0000-0000-0000-000000000003','南屯區','nantun', st_geomfromtext('MULTIPOLYGON(((120.62 24.155,120.665 24.155,120.665 24.115,120.62 24.115,120.62 24.155)))',4326), 168000)
-on conflict do nothing;
+insert into public.areas (id, name, code, geom, population_total, level)
+select *
+from (
+  values
+    ('00000000-0000-0000-0000-000000000001','西屯區','xitun',
+     st_geomfromtext('MULTIPOLYGON(((120.624 24.192,120.664 24.192,120.664 24.143,120.624 24.143))),4326'), 220000, 'district'),
 
-insert into public.facilities (id, area_id, type, name, icon, geom, health_grade, last_inspection_at)
+    ('00000000-0000-0000-0000-000000000002','北區','north',
+     st_geomfromtext('MULTIPOLYGON(((120.683 24.173,120.715 24.173,120.715 24.15,120.683 24.15))),4326'), 140000, 'district'),
+
+    ('00000000-0000-0000-0000-000000000003','南屯區','nantun',
+     st_geomfromtext('MULTIPOLYGON(((120.62 24.155,120.665 24.155,120.665 24.115,120.62 24.115))),4326'), 168000, 'district')
+) as tmp(id, name, code, geom, population_total, level)
+where not exists (select 1 from public.areas limit 1);
+
+insert into public.facilities (id, area_id, type, name, geom, health_grade, last_inspection_at)
 values
-  ('10000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000001','park','黎明公園', 'TreeDeciduous', st_setsrid(st_makepoint(120.646,24.16),4326),'B','2024-10-05'),
-  ('10000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000001','street_light','福康五街路燈 #12', 'Lightbulb', st_setsrid(st_makepoint(120.655,24.172),4326),'A','2024-11-10'),
-  ('10000000-0000-0000-0000-000000000003','00000000-0000-0000-0000-000000000001','park','文心森林公園', 'TreeDeciduous', st_setsrid(st_makepoint(120.64,24.158),4326),'C','2024-08-20'),
-  ('10000000-0000-0000-0000-000000000004','00000000-0000-0000-0000-000000000001','street_light','福星北路路燈 #21', 'Lightbulb', st_setsrid(st_makepoint(120.649,24.177),4326),'B','2024-11-05'),
-  ('10000000-0000-0000-0000-000000000005','00000000-0000-0000-0000-000000000001','police_station','西屯分局', 'ShieldCheck', st_setsrid(st_makepoint(120.648,24.164),4326),'A','2024-11-01'),
-  ('10000000-0000-0000-0000-000000000006','00000000-0000-0000-0000-000000000001','sidewalk','逢甲商圈人行道', 'Footprints', st_setsrid(st_makepoint(120.6455,24.174),4326),'B','2024-09-02'),
-  ('10000000-0000-0000-0000-000000000007','00000000-0000-0000-0000-000000000002','park','崇德公園', 'TreeDeciduous', st_setsrid(st_makepoint(120.69,24.163),4326),'B','2024-10-15'),
-  ('10000000-0000-0000-0000-000000000008','00000000-0000-0000-0000-000000000003','elder_center','南屯區樂齡中心', 'HeartHandshake', st_setsrid(st_makepoint(120.637,24.135),4326),'A','2024-10-30'),
-  ('10000000-0000-0000-0000-000000000009','00000000-0000-0000-0000-000000000001','drinking_fountain','草悟道飲水機', 'Droplets', st_setsrid(st_makepoint(120.6605,24.159),4326),'B','2024-10-28')
+  ('10000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000001','park','黎明公園', st_setsrid(st_makepoint(120.646,24.16),4326),'B','2024-10-05'),
+  ('10000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000001','street_light','福康五街路燈 #12', st_setsrid(st_makepoint(120.655,24.172),4326),'A','2024-11-10'),
+  ('10000000-0000-0000-0000-000000000003','00000000-0000-0000-0000-000000000001','park','文心森林公園', st_setsrid(st_makepoint(120.64,24.158),4326),'C','2024-08-20'),
+  ('10000000-0000-0000-0000-000000000004','00000000-0000-0000-0000-000000000001','street_light','福星北路路燈 #21', st_setsrid(st_makepoint(120.649,24.177),4326),'B','2024-11-05'),
+  ('10000000-0000-0000-0000-000000000005','00000000-0000-0000-0000-000000000001','police_station','西屯分局', st_setsrid(st_makepoint(120.648,24.164),4326),'A','2024-11-01'),
+  ('10000000-0000-0000-0000-000000000006','00000000-0000-0000-0000-000000000001','sidewalk','逢甲商圈人行道', st_setsrid(st_makepoint(120.6455,24.174),4326),'B','2024-09-02'),
+  ('10000000-0000-0000-0000-000000000007','00000000-0000-0000-0000-000000000002','park','崇德公園', st_setsrid(st_makepoint(120.69,24.163),4326),'B','2024-10-15'),
+  ('10000000-0000-0000-0000-000000000008','00000000-0000-0000-0000-000000000003','elder_center','南屯區樂齡中心', st_setsrid(st_makepoint(120.637,24.135),4326),'A','2024-10-30'),
+  ('10000000-0000-0000-0000-000000000009','00000000-0000-0000-0000-000000000001','drinking_fountain','草悟道飲水機', st_setsrid(st_makepoint(120.6605,24.159),4326),'B','2024-10-28')
 on conflict do nothing;
 
 insert into public.tickets (id, area_id, facility_id, geom, source, type, severity, status, created_at, sla_days, sla_due_at, estimated_cost, risk_impact, description)
@@ -208,11 +220,4 @@ values
   ('20000000-0000-0000-0000-000000000004','reported','2024-09-10','{}'),
   ('20000000-0000-0000-0000-000000000004','assigned','2024-09-18','{}'),
   ('20000000-0000-0000-0000-000000000004','work_started','2024-10-20','{}')
-on conflict do nothing;
-
-insert into public.missions (id, area_id, facility_id, title, description, type, status, due_at)
-values
-  ('40000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000001','黎明公園遊具安全巡檢','拍照滑梯、盪鞦韆、地墊狀況','park','open','2024-12-05'),
-  ('40000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000004','巷弄路燈巡檢','夜間檢查熄燈，記錄桿號與位置','street_light','open','2024-11-30'),
-  ('40000000-0000-0000-0000-000000000003','00000000-0000-0000-0000-000000000002',null,'學校周邊人行道平整度調查','標記坑洞或破損','sidewalk','open','2024-12-15')
 on conflict do nothing;

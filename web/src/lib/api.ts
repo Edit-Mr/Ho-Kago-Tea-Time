@@ -50,21 +50,35 @@ export async function submitTicket(formData: TicketFormData): Promise<{ id: stri
 
 type ApiResult<T> = { data?: T; error?: string };
 
-export async function fetchAreas(): Promise<ApiResult<Array<{ id: string; name: string; code?: string | null; populationTotal?: number | null; geom: GeoJSON.Geometry }>>> {
+export async function fetchAreas(): Promise<ApiResult<Array<{ id: string; name: string; code?: string | null; county: string; populationTotal?: number | null; geom: GeoJSON.Geometry }>>> {
   if (!supabase) return { error: "Supabase 環境變數未設定" };
-  const { data, error } = await supabase
-    .from("areas")
-    .select("id,name,code,population_total,geom");
-  if (error) return { error: error.message };
-  return {
-    data: data?.map((row) => ({
-      id: row.id,
-      name: row.name,
-      code: row.code,
-      populationTotal: row.population_total,
-      geom: row.geom as GeoJSON.Geometry,
-    })),
-  };
+  const { data, error } = await supabase.from("areas").select("id,name,code,county,population_total,geom");
+  if (error) {
+    const msg = error.message?.toLowerCase() ?? "";
+    if (msg.includes("column") && msg.includes("county")) {
+      return { error: "areas 表缺少 county 欄位，請先在資料庫加入 county 後再重試" };
+    }
+    return { error: error.message };
+  }
+  try {
+    const mapped = data?.map((row) => {
+      const county = (row as Record<string, unknown>).county;
+      if (county === undefined || county === null || county === "") {
+        throw new Error("areas 資料缺少 county 值，請確認縣市欄位已填寫");
+      }
+      return {
+        id: row.id,
+        name: row.name,
+        code: row.code,
+        county: county as string,
+        populationTotal: row.population_total,
+        geom: row.geom as GeoJSON.Geometry,
+      };
+    });
+    return { data: mapped };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "areas 資料缺少 county 欄位值" };
+  }
 }
 
 export async function fetchAreaRiskSnapshots(): Promise<ApiResult<Array<{ areaId: string; riskScore: number; computedAt: string; _computedAtRaw: string }>>> {
@@ -84,11 +98,45 @@ export async function fetchAreaRiskSnapshots(): Promise<ApiResult<Array<{ areaId
   };
 }
 
-export async function fetchFacilities(): Promise<ApiResult<Array<{ id: string; areaId?: string | null; type: string; name: string; iconEmoji?: string | null; geom: GeoJSON.Geometry; healthGrade?: string | null; lastInspectionAt?: string | null; hasOpenTicket?: boolean }>>> {
+export async function fetchFacilities(areaId?: string): Promise<ApiResult<Array<{ id: string; areaId?: string | null; type: string; name: string; geom: GeoJSON.Geometry; healthGrade?: string | null; lastInspectionAt?: string | null }>>> {
   if (!supabase) return { error: "Supabase 環境變數未設定" };
-  const { data, error } = await supabase
-    .from("facilities")
-    .select("id,area_id,type,name,icon_emoji,geom,health_grade,last_inspection_at,has_open_ticket");
+  const selectFields = "id,area_id,type,name,geom,health_grade,last_inspection_at";
+
+  // Prefer DB-side spatial filtering so facilities without area_id but located in the city are included.
+  if (areaId) {
+    const { data: spatialData, error: spatialError } = await supabase.rpc("facilities_in_area", { target_area_id: areaId });
+    if (!spatialError && spatialData) {
+      return {
+        data: spatialData.map((row) => ({
+          id: row.id,
+          areaId: row.area_id,
+          type: row.type,
+          name: row.name,
+          geom: row.geom as GeoJSON.Geometry,
+          healthGrade: row.health_grade,
+          lastInspectionAt: row.last_inspection_at,
+        })),
+      };
+    }
+    if (spatialError && !missingFunction(spatialError, "facilities_in_area")) return { error: spatialError.message };
+    // Fall back to simple area_id filter if the RPC is unavailable (older schema).
+    const base = supabase.from("facilities").select(selectFields);
+    const { data, error } = await base.eq("area_id", areaId);
+    if (error) return { error: error.message };
+    return {
+      data: data?.map((row) => ({
+        id: row.id,
+        areaId: row.area_id,
+        type: row.type,
+        name: row.name,
+        geom: row.geom as GeoJSON.Geometry,
+        healthGrade: row.health_grade,
+        lastInspectionAt: row.last_inspection_at,
+      })),
+    };
+  }
+
+  const { data, error } = await supabase.from("facilities").select(selectFields);
   if (error) return { error: error.message };
   return {
     data: data?.map((row) => ({
@@ -96,34 +144,37 @@ export async function fetchFacilities(): Promise<ApiResult<Array<{ id: string; a
       areaId: row.area_id,
       type: row.type,
       name: row.name,
-      iconEmoji: row.icon_emoji,
       geom: row.geom as GeoJSON.Geometry,
       healthGrade: row.health_grade,
       lastInspectionAt: row.last_inspection_at,
-      hasOpenTicket: row.has_open_ticket,
     })),
   };
 }
 
-export async function fetchFacilityTypes(): Promise<ApiResult<Array<{ type: string; labelZh: string; emoji?: string | null }>>> {
+export async function fetchFacilityTypes(): Promise<ApiResult<Array<{ type: string; labelZh: string; emoji?: string | null; iconName?: string | null }>>> {
   if (!supabase) return { error: "Supabase 環境變數未設定" };
-  const { data, error } = await supabase.from("facility_type_meta").select("type,label_zh,emoji");
+  const { data, error } = await supabase.from("facility_type_meta").select("type,label_zh,emoji,icon_name");
   if (error) return { error: error.message };
   return {
     data: data?.map((row) => ({
       type: row.type,
       labelZh: row.label_zh,
       emoji: row.emoji,
+      iconName: row.icon_name,
     })),
   };
 }
 
-export async function fetchFacilityInspections(): Promise<ApiResult<Array<{ facilityId: string; inspectedAt: string; incidentCountLastYear?: number | null; notes?: string | null }>>> {
+export async function fetchFacilityInspections(facilityIds?: string[]): Promise<ApiResult<Array<{ facilityId: string; inspectedAt: string; incidentCountLastYear?: number | null; notes?: string | null }>>> {
   if (!supabase) return { error: "Supabase 環境變數未設定" };
+  if (facilityIds && facilityIds.length === 0) return { data: [] };
   const { data, error } = await supabase
     .from("facility_inspections")
     .select("facility_id,inspected_at,incident_count_last_year,notes")
-    .order("inspected_at", { ascending: false });
+    .order("inspected_at", { ascending: false })
+    .modify((q) => {
+      if (facilityIds) q.in("facility_id", facilityIds);
+    });
   if (error) return { error: error.message };
   return {
     data: data?.map((row) => ({
@@ -135,11 +186,51 @@ export async function fetchFacilityInspections(): Promise<ApiResult<Array<{ faci
   };
 }
 
-export async function fetchTickets(): Promise<ApiResult<Array<{ id: string; areaId?: string | null; facilityId?: string | null; geom?: GeoJSON.Geometry | null; status: string; type: string; severity?: number | null; slaDueAt?: string | null; createdAt?: string | null; description?: string | null; photoUrls?: string[] | null }>>> {
+export async function fetchTickets(areaId?: string): Promise<ApiResult<Array<{ id: string; areaId?: string | null; facilityId?: string | null; geom?: GeoJSON.Geometry | null; status: string; type: string; severity?: number | null; slaDueAt?: string | null; createdAt?: string | null; description?: string | null; photoUrls?: string[] | null }>>> {
   if (!supabase) return { error: "Supabase 環境變數未設定" };
-  const { data, error } = await supabase
-    .from("tickets")
-    .select("id,area_id,facility_id,geom,status,type,severity,sla_due_at,created_at,description,photo_urls");
+  const selectFields = "id,area_id,facility_id,geom,status,type,severity,sla_due_at,created_at,description,photo_urls";
+
+  if (areaId) {
+    const { data: spatialData, error: spatialError } = await supabase.rpc("tickets_in_area", { target_area_id: areaId });
+    if (!spatialError && spatialData) {
+      return {
+        data: spatialData.map((row) => ({
+          id: row.id,
+          areaId: row.area_id,
+          facilityId: row.facility_id,
+          geom: row.geom as GeoJSON.Geometry | null,
+          status: row.status,
+          type: row.type,
+          severity: row.severity,
+          slaDueAt: row.sla_due_at,
+          createdAt: row.created_at,
+          description: row.description,
+          photoUrls: row.photo_urls,
+        })),
+      };
+    }
+    if (spatialError && !missingFunction(spatialError, "tickets_in_area")) return { error: spatialError.message };
+    const base = supabase.from("tickets").select(selectFields);
+    const { data, error } = await base.eq("area_id", areaId);
+    if (error) return { error: error.message };
+    return {
+      data: data?.map((row) => ({
+        id: row.id,
+        areaId: row.area_id,
+        facilityId: row.facility_id,
+        geom: row.geom as GeoJSON.Geometry | null,
+        status: row.status,
+        type: row.type,
+        severity: row.severity,
+        slaDueAt: row.sla_due_at,
+        createdAt: row.created_at,
+        description: row.description,
+        photoUrls: row.photo_urls,
+      })),
+    };
+  }
+
+  const { data, error } = await supabase.from("tickets").select(selectFields);
   if (error) return { error: error.message };
   return {
     data: data?.map((row) => ({
@@ -158,12 +249,20 @@ export async function fetchTickets(): Promise<ApiResult<Array<{ id: string; area
   };
 }
 
-export async function fetchTicketEvents(): Promise<ApiResult<Array<{ ticketId: string; eventType: string; createdAt: string; data?: Record<string, unknown> | null }>>> {
+function missingFunction(error: { message?: string }, functionName: string) {
+  return !!error?.message && error.message.toLowerCase().includes(`${functionName} does not exist`);
+}
+
+export async function fetchTicketEvents(ticketIds?: string[]): Promise<ApiResult<Array<{ ticketId: string; eventType: string; createdAt: string; data?: Record<string, unknown> | null }>>> {
   if (!supabase) return { error: "Supabase 環境變數未設定" };
+  if (ticketIds && ticketIds.length === 0) return { data: [] };
   const { data, error } = await supabase
     .from("ticket_events")
     .select("ticket_id,event_type,created_at,data")
-    .order("created_at", { ascending: true });
+    .order("created_at", { ascending: true })
+    .modify((q) => {
+      if (ticketIds) q.in("ticket_id", ticketIds);
+    });
   if (error) return { error: error.message };
   return {
     data: data?.map((row) => ({
@@ -171,26 +270,6 @@ export async function fetchTicketEvents(): Promise<ApiResult<Array<{ ticketId: s
       eventType: row.event_type,
       createdAt: row.created_at,
       data: row.data,
-    })),
-  };
-}
-
-export async function fetchMissions(): Promise<ApiResult<Array<{ id: string; areaId?: string | null; facilityId?: string | null; title: string; description?: string | null; type?: string | null; status: string; dueAt?: string | null }>>> {
-  if (!supabase) return { error: "Supabase 環境變數未設定" };
-  const { data, error } = await supabase
-    .from("missions")
-    .select("id,area_id,facility_id,title,description,type,status,due_at");
-  if (error) return { error: error.message };
-  return {
-    data: data?.map((row) => ({
-      id: row.id,
-      areaId: row.area_id,
-      facilityId: row.facility_id,
-      title: row.title,
-      description: row.description,
-      type: row.type,
-      status: row.status,
-      dueAt: row.due_at,
     })),
   };
 }

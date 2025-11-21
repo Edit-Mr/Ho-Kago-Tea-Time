@@ -24,12 +24,14 @@ function MapPage() {
   const isRightPanelOpen = useUiStore((s) => s.isRightPanelOpen);
   const { areas, facilities, tickets, ticketEvents, loading, error, loadAll } = useDataStore();
   const facilityTypesMeta = useDataStore((s) => s.facilityTypes);
+  const viewport = useMapStore((s) => s.viewport);
 
   useEffect(() => {
-    loadAll().catch(() => {
+    const areaFromCenter = viewport.center as [number, number];
+    loadAll({ center: areaFromCenter }).catch(() => {
       // error handled via store state
     });
-  }, [loadAll]);
+  }, [loadAll, viewport.center]);
 
   const areaSummaries: AreaSummary[] = useMemo(() => {
     return areas.map((a) => {
@@ -130,7 +132,7 @@ function MapPage() {
             lastInspection: f.lastInspection?.slice(0, 10) ?? "—",
             incidentsPastYear: f.incidentsPastYear ?? 0,
             coordinates: f.coords as [number, number],
-            iconEmoji: f.iconEmoji ?? f.typeEmoji ?? undefined,
+            iconName: f.typeIconName ?? "MapPin",
           };
         }),
     [facilities, tickets]
@@ -177,17 +179,6 @@ function MapPage() {
       </div>
 
       <div className="absolute top-4 left-4 space-y-3 w-80 z-10 max-h-[calc(100vh-120px)] overflow-y-auto pr-1">
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-3 flex gap-2 shadow-lg backdrop-blur">
-          <Input
-            placeholder="輸入地址或區域搜尋"
-            value={searchValue}
-            onChange={(e) => setSearchValue(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-          />
-          <Button onClick={handleSearch}>搜尋</Button>
-        </div>
-        <LayerToggles facilityTypes={uniqueFacilityTypes} />
-        <PolicyExperimentCard />
         {error && (
           <Card className="border-red-500/40 bg-red-500/10">
             <CardHeader className="flex items-center justify-between">
@@ -201,6 +192,17 @@ function MapPage() {
             </CardContent>
           </Card>
         )}
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-3 flex gap-2 shadow-lg backdrop-blur">
+          <Input
+            placeholder="輸入地址或區域搜尋"
+            value={searchValue}
+            onChange={(e) => setSearchValue(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+          />
+          <Button onClick={handleSearch}>搜尋</Button>
+        </div>
+        <LayerToggles facilityTypes={uniqueFacilityTypes} />
+        <PolicyExperimentCard />
       </div>
 
       {isRightPanelOpen && (

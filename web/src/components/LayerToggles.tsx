@@ -160,9 +160,8 @@ function LayerToggles({ facilityTypes }: LayerTogglesProps) {
             </Button>
           </div>
           <div className="flex flex-wrap gap-1">
-            {facilityTypes.map(({ type, label, emoji }) => {
+            {facilityTypes.map(({ type, label }) => {
               const active = facilityTypeFilter.length === 0 || facilityTypeFilter.includes(type);
-              const text = `${emoji ? `${emoji} ` : ""}${label}`;
               return (
                 <button
                   key={type}
@@ -172,7 +171,7 @@ function LayerToggles({ facilityTypes }: LayerTogglesProps) {
                     active ? "bg-brand-500/15 text-brand-50 border-brand-400/50" : "bg-slate-800 text-slate-200 border border-slate-700"
                   }`}
                 >
-                  {text}
+                  {label}
                 </button>
               );
             })}

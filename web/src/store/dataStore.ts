@@ -1,11 +1,12 @@
 import { create } from "zustand";
 import type GeoJSON from "geojson";
-import { fetchAreaRiskSnapshots, fetchAreas, fetchFacilities, fetchFacilityInspections, fetchFacilityTypes, fetchMissions, fetchTicketEvents, fetchTickets } from "../lib/api";
+import { fetchAreaRiskSnapshots, fetchAreas, fetchFacilities, fetchFacilityInspections, fetchFacilityTypes, fetchTicketEvents, fetchTickets } from "../lib/api";
 
 export type AreaRecord = {
   id: string;
   name: string;
   code?: string | null;
+  county: string;
   geom: GeoJSON.Geometry;
   populationTotal?: number | null;
   riskScore?: number;
@@ -17,14 +18,13 @@ export type FacilityRecord = {
   type: string;
   typeLabel?: string;
   typeEmoji?: string | null;
+  typeIconName?: string | null;
   name: string;
-  iconEmoji?: string | null;
   coords?: [number, number];
   grade?: "A" | "B" | "C";
   lastInspection?: string;
   incidentsPastYear?: number;
   latestInspectionNotes?: string | null;
-  hasOpenTicket?: boolean;
 };
 
 export type TicketRecord = {
@@ -48,57 +48,63 @@ export type TicketEventRecord = {
   data?: Record<string, unknown> | null;
 };
 
-export type MissionRecord = {
-  id: string;
-  areaId?: string | null;
-  facilityId?: string | null;
-  title: string;
-  description?: string | null;
-  status: string;
-  type?: string | null;
-  dueAt?: string | null;
-};
-
 type DataState = {
   areas: AreaRecord[];
   facilities: FacilityRecord[];
   tickets: TicketRecord[];
   ticketEvents: TicketEventRecord[];
-  missions: MissionRecord[];
   areaRiskSnapshots: Array<{ areaId: string; riskScore: number; computedAt: string; _computedAtRaw: string }>;
-  facilityTypes: Array<{ type: string; labelZh: string; emoji?: string | null }>;
+  facilityTypes: Array<{ type: string; labelZh: string; emoji?: string | null; iconName?: string | null }>;
+  currentAreaId?: string;
   loading: boolean;
   error?: string;
-  loadAll: () => Promise<void>;
+  loadAll: (opts?: { areaId?: string; center?: [number, number] }) => Promise<void>;
 };
 
-export const useDataStore = create<DataState>((set) => ({
+export const useDataStore = create<DataState>((set, get) => ({
   areas: [],
   facilities: [],
   tickets: [],
   ticketEvents: [],
-  missions: [],
   areaRiskSnapshots: [],
   facilityTypes: [],
+  currentAreaId: undefined,
   loading: false,
   error: undefined,
-  loadAll: async () => {
+  loadAll: async (opts) => {
     set({ loading: true, error: undefined });
     try {
-      const [areasRes, riskRes, facilitiesRes, inspectionsRes, ticketsRes, ticketEventsRes, missionsRes, facilityTypesRes] = await Promise.all([
-        fetchAreas(),
-        fetchAreaRiskSnapshots(),
-        fetchFacilities(),
-        fetchFacilityInspections(),
-        fetchTickets(),
-        fetchTicketEvents(),
-        fetchMissions(),
-        fetchFacilityTypes(),
-      ]);
+      const [areasRes, riskRes, facilityTypesRes] = await Promise.all([fetchAreas(), fetchAreaRiskSnapshots(), fetchFacilityTypes()]);
       if (areasRes.error) throw new Error(areasRes.error);
+      if (facilityTypesRes.error) throw new Error(facilityTypesRes.error);
+
+      const areas = areasRes.data?.map((a) => ({
+        id: a.id,
+        name: a.name,
+        code: a.code,
+        county: a.county,
+        geom: a.geom as GeoJSON.Geometry,
+        populationTotal: a.populationTotal,
+        riskScore: undefined,
+      })) ?? [];
+      if (areas.some((a) => !a.county)) throw new Error("區域資料缺少 county 欄位或值，請確認資料庫縣市欄位已填寫");
+
+      const targetAreaId = opts?.areaId ?? pickAreaByCenter(areas, opts?.center) ?? areas[0]?.id;
+      if (!targetAreaId) throw new Error("找不到可用的行政區，無法載入地圖資料");
+      if (targetAreaId && get().currentAreaId === targetAreaId && get().facilities.length > 0) {
+        set({ loading: false });
+        return;
+      }
+
+      const [facilitiesRes, ticketsRes] = await Promise.all([fetchFacilities(targetAreaId), fetchTickets(targetAreaId)]);
       if (facilitiesRes.error) throw new Error(facilitiesRes.error);
       if (ticketsRes.error) throw new Error(ticketsRes.error);
-      if (facilityTypesRes.error) throw new Error(facilityTypesRes.error);
+
+      const facilityIds = facilitiesRes.data?.map((f) => f.id) ?? [];
+      const ticketIds = ticketsRes.data?.map((t) => t.id) ?? [];
+      const [inspectionsRes, ticketEventsRes] = await Promise.all([fetchFacilityInspections(facilityIds), fetchTicketEvents(ticketIds)]);
+      if (inspectionsRes.error) throw new Error(inspectionsRes.error);
+      if (ticketEventsRes.error) throw new Error(ticketEventsRes.error);
 
       const latestRiskByArea = new Map<string, { score: number; at: number }>();
       riskRes.data?.forEach((r) => {
@@ -121,8 +127,8 @@ export const useDataStore = create<DataState>((set) => ({
         }
       });
 
-      const typeMeta = new Map<string, { labelZh: string; emoji?: string | null }>();
-      facilityTypesRes.data?.forEach((t) => typeMeta.set(t.type, { labelZh: t.labelZh, emoji: t.emoji }));
+      const typeMeta = new Map<string, { labelZh: string; emoji?: string | null; iconName?: string | null }>();
+      facilityTypesRes.data?.forEach((t) => typeMeta.set(t.type, { labelZh: t.labelZh, emoji: t.emoji, iconName: t.iconName }));
 
       const facilities = facilitiesRes.data?.map((f) => {
         const latestInspection = latestInspectionByFacility.get(f.id);
@@ -133,25 +139,15 @@ export const useDataStore = create<DataState>((set) => ({
           type: f.type,
           typeLabel: meta?.labelZh ?? undefined,
           typeEmoji: meta?.emoji ?? null,
+          typeIconName: meta?.iconName ?? null,
           name: f.name,
-          iconEmoji: f.iconEmoji ?? meta?.emoji ?? null,
           coords: (f.geom as GeoJSON.Point | undefined)?.coordinates as [number, number] | undefined,
           grade: (f.healthGrade as FacilityRecord["grade"]) ?? undefined,
           lastInspection: latestInspection?.inspectedAt ?? f.lastInspectionAt ?? undefined,
           incidentsPastYear: latestInspection?.incidentCount ?? undefined,
           latestInspectionNotes: latestInspection?.notes ?? null,
-          hasOpenTicket: f.hasOpenTicket ?? false,
         } satisfies FacilityRecord;
       }) ?? [];
-
-      const areas = areasRes.data?.map((a) => ({
-        id: a.id,
-        name: a.name,
-        code: a.code,
-        geom: a.geom as GeoJSON.Geometry,
-        populationTotal: a.populationTotal,
-        riskScore: latestRiskByArea.get(a.id)?.score,
-      })) ?? [];
 
       const tickets = ticketsRes.data?.map((t) => ({
         id: t.id,
@@ -167,14 +163,25 @@ export const useDataStore = create<DataState>((set) => ({
         photoUrls: t.photoUrls,
       })) ?? [];
 
+      const areasWithRisk = areas.map((a) => ({
+        ...a,
+        riskScore: latestRiskByArea.get(a.id)?.score,
+      }));
+
+      const targetArea = areasWithRisk.find((a) => a.id === targetAreaId);
+      const filteredAreas = targetArea?.county
+        ? areasWithRisk.filter((a) => a.county === targetArea.county)
+        : areasWithRisk.filter((a) => a.id === targetAreaId);
+      const filteredRisk = (riskRes.data ?? []).filter((r) => filteredAreas.some((a) => a.id === r.areaId));
+
       set({
-        areas,
+        areas: filteredAreas,
         facilities,
         tickets,
         facilityTypes: facilityTypesRes.data ?? [],
+        currentAreaId: targetAreaId,
         ticketEvents: ticketEventsRes.data ?? [],
-        missions: missionsRes.data ?? [],
-        areaRiskSnapshots: riskRes.data ?? [],
+        areaRiskSnapshots: filteredRisk,
         loading: false,
         error: undefined,
       });
@@ -184,3 +191,60 @@ export const useDataStore = create<DataState>((set) => ({
     }
   },
 }));
+
+function pickAreaByCenter(areas: AreaRecord[], center?: [number, number]) {
+  if (!center) return undefined;
+  const [lng, lat] = center;
+  for (const area of areas) {
+    if (area.geom && isPointInsideGeometry([lng, lat], area.geom)) return area.id;
+  }
+  // fallback: nearest bbox center
+  let best: { id: string; dist: number } | undefined;
+  areas.forEach((a) => {
+    const c = bboxCenter(a.geom);
+    const dist = distanceSq(center, c);
+    if (!best || dist < best.dist) best = { id: a.id, dist };
+  });
+  return best?.id;
+}
+
+function isPointInsideGeometry(point: [number, number], geom: GeoJSON.Geometry): boolean {
+  if (geom.type === "Polygon") return isPointInPolygon(point, geom.coordinates as GeoJSON.Position[][]);
+  if (geom.type === "MultiPolygon") return (geom.coordinates as GeoJSON.Position[][][]).some((poly) => isPointInPolygon(point, poly));
+  return false;
+}
+
+function isPointInPolygon(point: [number, number], rings: GeoJSON.Position[][]): boolean {
+  const [lng, lat] = point;
+  let inside = false;
+  const ring = rings[0];
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0], yi = ring[i][1];
+    const xj = ring[j][0], yj = ring[j][1];
+    const intersect = yi > lat !== yj > lat && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function bboxCenter(geom: GeoJSON.Geometry): [number, number] {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const visit = (coords: any) => {
+    if (typeof coords[0] === "number") {
+      const [x, y] = coords as [number, number];
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    } else {
+      coords.forEach(visit);
+    }
+  };
+  visit((geom as any).coordinates);
+  if (minX === Infinity) return [0, 0];
+  return [(minX + maxX) / 2, (minY + maxY) / 2];
+}
+
+function distanceSq(a: [number, number], b: [number, number]) {
+  return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2;
+}
