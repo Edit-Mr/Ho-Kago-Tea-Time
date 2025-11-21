@@ -10,7 +10,7 @@ import { useDataStore } from "../store/dataStore";
 
 type ReportForm = {
   isHealthy: "yes" | "no" | "";
-  needsMaintenance: "yes" | "no" | "";
+  maintenanceType: "clean" | "repair" | "renovate" | "replace" | "none" | "";
   note: string;
   photo?: File | null;
 };
@@ -20,7 +20,7 @@ function MissionsPage() {
   const [type, setType] = useState("all");
   const [keyword, setKeyword] = useState("");
   const [reportingFacilityId, setReportingFacilityId] = useState<string | null>(null);
-  const [reportForm, setReportForm] = useState<ReportForm>({ isHealthy: "", needsMaintenance: "", note: "", photo: null });
+  const [reportForm, setReportForm] = useState<ReportForm>({ isHealthy: "", maintenanceType: "", note: "", photo: null });
   const { areas, facilities, loadAll } = useDataStore();
 
   useEffect(() => {
@@ -62,14 +62,14 @@ function MissionsPage() {
 
   const handleOpenReport = (facilityId: string) => {
     setReportingFacilityId(facilityId);
-    setReportForm({ isHealthy: "", needsMaintenance: "", note: "", photo: null });
+    setReportForm({ isHealthy: "", maintenanceType: "", note: "", photo: null });
   };
 
   const handleSubmitReport = () => {
     const payload = {
       facilityId: reportingFacilityId,
       isHealthy: reportForm.isHealthy,
-      needsMaintenance: reportForm.needsMaintenance,
+      maintenanceType: reportForm.maintenanceType,
       note: reportForm.note,
       photo: reportForm.photo?.name,
     };
@@ -166,10 +166,13 @@ function ReportDrawer({
           </div>
         </div>
         <div>
-          <p className="text-xs text-slate-400 pb-1">是否需要維護？</p>
-          <div className="flex gap-2">
-            <Button variant={form.needsMaintenance === "yes" ? "primary" : "secondary"} onClick={() => onChange({ ...form, needsMaintenance: "yes" })}>需要</Button>
-            <Button variant={form.needsMaintenance === "no" ? "primary" : "secondary"} onClick={() => onChange({ ...form, needsMaintenance: "no" })}>不需要</Button>
+          <p className="text-xs text-slate-400 pb-1">需要什麼維護？</p>
+          <div className="grid grid-cols-2 gap-2">
+            <Button variant={form.maintenanceType === "clean" ? "primary" : "secondary"} onClick={() => onChange({ ...form, maintenanceType: "clean" })}>清潔</Button>
+            <Button variant={form.maintenanceType === "repair" ? "primary" : "secondary"} onClick={() => onChange({ ...form, maintenanceType: "repair" })}>修復</Button>
+            <Button variant={form.maintenanceType === "renovate" ? "primary" : "secondary"} onClick={() => onChange({ ...form, maintenanceType: "renovate" })}>整修</Button>
+            <Button variant={form.maintenanceType === "replace" ? "primary" : "secondary"} onClick={() => onChange({ ...form, maintenanceType: "replace" })}>更換</Button>
+            <Button variant={form.maintenanceType === "none" ? "primary" : "secondary"} onClick={() => onChange({ ...form, maintenanceType: "none" })}>不需要</Button>
           </div>
         </div>
         <div>
@@ -187,7 +190,7 @@ function ReportDrawer({
         </div>
         <div className="flex justify-end gap-2">
           <Button variant="secondary" onClick={onClose}>取消</Button>
-          <Button onClick={onSubmit} disabled={!form.isHealthy || !form.needsMaintenance}>送出</Button>
+          <Button onClick={onSubmit} disabled={!form.isHealthy || !form.maintenanceType}>送出</Button>
         </div>
       </div>
     </Drawer>

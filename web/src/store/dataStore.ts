@@ -79,14 +79,6 @@ export const useDataStore = create<DataState>((set, get) => ({
   error: undefined,
   loadAll: async (opts) => {
     try {
-      const stateBeforeFetch = get();
-      if (!opts?.lightAreas && opts?.center && stateBeforeFetch.currentCounty && stateBeforeFetch.areas.length > 0) {
-        const insideExistingCounty = stateBeforeFetch.areas.some((a) => a.county === stateBeforeFetch.currentCounty && a.geom && isPointInsideGeometry(opts.center as [number, number], a.geom));
-        if (insideExistingCounty) {
-          return;
-        }
-      }
-
       const onlyNeedLightAreas = !!opts?.lightAreas && !opts?.areaId && !opts?.center;
       const namesOnly = !!opts?.namesOnly;
       set({ loading: !namesOnly, error: undefined });
@@ -103,35 +95,31 @@ export const useDataStore = create<DataState>((set, get) => ({
 
       countyFilter = countyFilter ?? get().currentCounty;
 
-      const stateAfterAreaLookup = get();
-      const tentativeAreaId = opts?.areaId ?? areaFromPoint?.id;
+      const stateBeforeFetch = get();
       if (
-        tentativeAreaId &&
+        !opts?.lightAreas &&
         countyFilter &&
-        stateAfterAreaLookup.currentAreaId === tentativeAreaId &&
-        stateAfterAreaLookup.currentCounty === countyFilter &&
-        stateAfterAreaLookup.facilities.length > 0 &&
-        stateAfterAreaLookup.tickets.length > 0
+        stateBeforeFetch.currentCounty === countyFilter &&
+        stateBeforeFetch.facilities.length > 0 &&
+        stateBeforeFetch.tickets.length > 0
       ) {
-        set({ loading: false });
-        return;
+        if (
+          !opts?.center ||
+          stateBeforeFetch.areas.some((a) => a.county === countyFilter && a.geom && isPointInsideGeometry(opts.center as [number, number], a.geom))
+        ) {
+          set({ loading: false });
+          return;
+        }
       }
 
       const areaSelect = needsGeom ? "full" : "lite";
-      const existingAreas = get().areas;
-      const canReuseAreas = countyFilter && existingAreas.length > 0 && get().currentCounty === countyFilter;
-      const needGeomButMissing = needsGeom && !existingAreas.every((a) => a.geom);
-      const shouldFetchAreas = !canReuseAreas || needGeomButMissing || (!countyFilter && !tentativeAreaId);
-
-      const areasRes = shouldFetchAreas
-        ? await fetchAreas(
-          countyFilter
+      const areasRes = await fetchAreas(
+        opts?.areaId
+          ? { areaId: opts.areaId, select: areaSelect, level: "village" }
+          : countyFilter
             ? { county: countyFilter, select: areaSelect, level: "village" }
-            : tentativeAreaId
-              ? { areaId: tentativeAreaId, select: areaSelect }
-              : { select: areaSelect, level: "village" }
-        )
-        : { data: existingAreas };
+            : { select: areaSelect, level: "village" }
+      );
       if (areasRes.error) throw new Error(areasRes.error);
 
       const areas = areasRes.data?.map((a) => ({
@@ -149,7 +137,6 @@ export const useDataStore = create<DataState>((set, get) => ({
         set((prev) => ({
           areas,
           areaOptions: areas.map(({ id, name, code, county }) => ({ id, name, code, county })),
-          // 保留既有的詳細資料，僅更新選單
           facilities: prev.facilities,
           tickets: prev.tickets,
           facilityTypes: prev.facilityTypes,
@@ -171,12 +158,18 @@ export const useDataStore = create<DataState>((set, get) => ({
             ? pickAreaByCenter(areas.filter((a) => a.geom) as AreaRecord[], opts?.center)
             : areas[0]?.id;
       if (!targetAreaId) throw new Error("找不到可用的行政區，無法載入地圖資料");
-      if (targetAreaId && get().currentAreaId === targetAreaId && get().facilities.length > 0) {
+      if (
+        countyFilter &&
+        stateBeforeFetch.currentCounty === countyFilter &&
+        stateBeforeFetch.currentAreaId === targetAreaId &&
+        stateBeforeFetch.facilities.length > 0 &&
+        stateBeforeFetch.tickets.length > 0
+      ) {
         set({ loading: false });
         return;
       }
 
-      const [facilitiesRes, ticketsRes] = await Promise.all([fetchFacilities(targetAreaId), fetchTickets(targetAreaId)]);
+      const [facilitiesRes, ticketsRes] = await Promise.all([fetchFacilities(), fetchTickets(targetAreaId)]);
       if (facilitiesRes.error) throw new Error(facilitiesRes.error);
       if (ticketsRes.error) throw new Error(ticketsRes.error);
 
@@ -213,7 +206,7 @@ export const useDataStore = create<DataState>((set, get) => ({
       const typeMeta = new Map<string, { labelZh: string; emoji?: string | null; iconName?: string | null }>();
       facilityTypesRes.data?.forEach((t) => typeMeta.set(t.type, { labelZh: t.labelZh, emoji: t.emoji, iconName: t.iconName }));
 
-      const facilities = facilitiesRes.data?.map((f) => {
+      const facilitiesMapped = facilitiesRes.data?.map((f) => {
         const latestInspection = latestInspectionByFacility.get(f.id);
         const meta = typeMeta.get(f.type);
         return {
@@ -256,6 +249,13 @@ export const useDataStore = create<DataState>((set, get) => ({
         ? areasWithRisk.filter((a) => a.county === targetArea.county)
         : areasWithRisk.filter((a) => a.id === targetAreaId);
       const filteredRisk = (riskRes.data ?? []).filter((r) => filteredAreas.some((a) => a.id === r.areaId));
+
+      const allowedAreaIds = new Set(filteredAreas.map((a) => a.id));
+      const facilities = facilitiesMapped.filter((f) => {
+        if (f.areaId && allowedAreaIds.has(f.areaId)) return true;
+        if (!f.coords) return false;
+        return filteredAreas.some((a) => a.geom && isPointInsideGeometry(f.coords as [number, number], a.geom as GeoJSON.Geometry));
+      });
 
       set({
         areas: filteredAreas,

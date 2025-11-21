@@ -37,6 +37,17 @@ type MapViewProps = {
 const areaSourceId = "areas-source";
 const facilitySourceId = "facilities-source";
 const ticketSourceId = "tickets-source";
+const gradeColors: Record<Facility["grade"], string> = {
+  A: "#22c55e",
+  B: "#f59e0b",
+  C: "#ef4444"
+};
+const statusColors: Record<Facility["maintenanceStatus"], string> = {
+  safe: "#22c55e",
+  in_progress: "#fbbf24",
+  overdue: "#ef4444"
+};
+const loadingImages = new Set<string>();
 
 function MapView({ areasGeoJson, facilities, tickets, onAreaClick, onFacilityClick, onTicketClick }: MapViewProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
@@ -192,6 +203,15 @@ function MapView({ areasGeoJson, facilities, tickets, onAreaClick, onFacilityCli
           map.getCanvas().style.cursor = "";
         });
       });
+
+      // If the style requests an icon we haven't added yet, generate it on demand.
+      map.on("styleimagemissing", (e) => {
+        const match = /^lucide-([A-Za-z0-9]+)-(A|B|C)$/.exec(e.id);
+        if (!match) return;
+        const [, iconName, grade] = match;
+        const color = gradeColors[grade as Facility["grade"]] ?? "#cbd5e1";
+        addLucideIcon(map, e.id, color, iconName);
+      });
     });
 
     return () => {
@@ -256,17 +276,6 @@ function facilitiesToFeatureCollection(facilities: Facility[]): GeoJSON.FeatureC
 }
 
 function addFacilityIcons(map: Map, facilities: Facility[]) {
-  const statusColors: Record<Facility["maintenanceStatus"], string> = {
-    safe: "#22c55e",
-    in_progress: "#fbbf24",
-    overdue: "#ef4444"
-  };
-  const gradeColors: Record<Facility["grade"], string> = {
-    A: "#22c55e",
-    B: "#f59e0b",
-    C: "#ef4444"
-  };
-
   facilities.forEach(f => {
     const iconKey = f.iconName ? `lucide-${f.iconName}-${f.grade}` : `facility-${f.type}-${f.grade}`;
     if (map.hasImage(iconKey)) return;
@@ -282,12 +291,27 @@ function addLucideIcon(map: Map, id: string, colorHex: string, iconName?: string
     ? renderToStaticMarkup(createElement(IconComponent, { color: colorHex, size: 44, strokeWidth: 2 }))
     : `<svg xmlns="http://www.w3.org/2000/svg" width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="${colorHex}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9" /></svg>`;
   const encoded = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgMarkup)}`;
+  if (map.hasImage(id) || loadingImages.has(id)) return;
+  loadingImages.add(id);
 
-  map.loadImage(encoded, (error, image) => {
-    if (error || !image) return;
-    if (map.hasImage(id)) return;
-    map.addImage(id, image);
-  });
+  const img = new Image();
+  img.crossOrigin = "anonymous";
+  img.onload = () => {
+    createImageBitmap(img)
+      .then((bitmap) => {
+        if (!map.hasImage(id)) {
+          map.addImage(id, bitmap, { pixelRatio: 2 });
+        }
+      })
+      .finally(() => loadingImages.delete(id))
+      .catch(() => {
+        loadingImages.delete(id);
+      });
+  };
+  img.onerror = () => {
+    loadingImages.delete(id);
+  };
+  img.src = encoded;
 }
 
 function ticketsToFeatureCollection(tickets: Ticket[]): GeoJSON.FeatureCollection<GeoJSON.Point> {

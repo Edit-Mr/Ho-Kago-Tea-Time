@@ -17,22 +17,55 @@ import { useDataStore, type AreaRecord, type TicketRecord } from "../store/dataS
 import { deriveTicketStatus } from "../utils/tickets";
 import { type FacilityStatusFilter } from "../store/mapStore";
 
+function isPointInsideGeometry(point: [number, number], geom?: GeoJSON.Geometry): boolean {
+  if (!geom) return false;
+  if (geom.type === "Polygon") return isPointInPolygon(point, geom.coordinates as GeoJSON.Position[][]);
+  if (geom.type === "MultiPolygon") return (geom.coordinates as GeoJSON.Position[][][]).some(poly => isPointInPolygon(point, poly));
+  return false;
+}
+
+function isPointInPolygon(point: [number, number], rings: GeoJSON.Position[][]): boolean {
+  const [lng, lat] = point;
+  let inside = false;
+  const ring = rings[0];
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0], yi = ring[i][1];
+    const xj = ring[j][0], yj = ring[j][1];
+    const intersect = yi > lat !== yj > lat && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
 function MapPage() {
   const { selectedAreaId, selectedFacilityId, selectArea, selectFacility } = useMapStore();
   const [searchValue, setSearchValue] = useState("");
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
   const toggleRightPanel = useUiStore(s => s.toggleRightPanel);
   const isRightPanelOpen = useUiStore(s => s.isRightPanelOpen);
-  const { areas, facilities, tickets, ticketEvents, loading, error, loadAll } = useDataStore();
+  const setRightPanelOpen = useUiStore(s => s.setRightPanelOpen);
+  const { areas, areaOptions, facilities, tickets, ticketEvents, loading, error, loadAll } = useDataStore();
   const facilityTypesMeta = useDataStore(s => s.facilityTypes);
   const viewport = useMapStore(s => s.viewport);
 
-  // Keep data in sync with wherever the map center moves; loadAll will no-op if still inside the current county.
+  // Preload names list for search suggestions
+  useEffect(() => {
+    loadAll({ lightAreas: true, namesOnly: true }).catch(() => {
+      // handled via store
+    });
+  }, [loadAll]);
+
+  // Fetch only when we pan outside the currently loaded areas; stay put otherwise to avoid marker flicker.
   useEffect(() => {
     const areaFromCenter = viewport.center as [number, number];
-    loadAll({ center: areaFromCenter }).catch(() => {
-      // error handled via store state
-    });
-  }, [loadAll, viewport.center]);
+    const insideKnownArea = areas.some(a => a.geom && isPointInsideGeometry(areaFromCenter, a.geom as GeoJSON.Geometry));
+    if (!insideKnownArea) {
+      loadAll({ center: areaFromCenter }).catch(() => {
+        // error handled via store state
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewport.center, areas]);
 
   // Allow reloading when a different area is explicitly selected (e.g., via list/search), not on map drags.
   useEffect(() => {
@@ -42,23 +75,42 @@ function MapPage() {
     });
   }, [loadAll, selectedAreaId]);
 
+  const areaIdByPoint = useMemo(() => {
+    const withGeom = areas.filter(a => a.geom);
+    return (coords?: [number, number]) => {
+      if (!coords) return undefined;
+      const hit = withGeom.find(a => isPointInsideGeometry(coords, a.geom as GeoJSON.Geometry));
+      return hit?.id;
+    };
+  }, [areas]);
+
+  const ticketsWithArea = useMemo(
+    () =>
+      tickets.map(t => ({
+        ...t,
+        areaId: t.areaId ?? areaIdByPoint(t.coords)
+      })),
+    [areaIdByPoint, tickets]
+  );
+
   const areaSummaries: AreaSummary[] = useMemo(() => {
     return areas.map(a => {
-      const openTickets = tickets.filter(t => t.areaId === a.id && t.status !== "completed" && t.status !== "cancelled");
+      const openTickets = ticketsWithArea.filter(t => t.areaId === a.id && t.status !== "completed" && t.status !== "cancelled");
       const overdueTickets = openTickets.filter(t => {
         if (!t.slaDueAt) return false;
         return new Date(t.slaDueAt).getTime() < Date.now();
       });
+      const derivedRisk = a.riskScore ?? Math.min(100, overdueTickets.length * 25 + (openTickets.length - overdueTickets.length) * 10);
       return {
         id: a.id,
         name: a.name,
-        riskScore: a.riskScore ?? 0,
+        riskScore: derivedRisk,
         facilities: facilities.filter(f => f.areaId === a.id).length,
         openTickets: openTickets.length,
         overdueTickets: overdueTickets.length
       };
     });
-  }, [areas, facilities, tickets]);
+  }, [areas, facilities, ticketsWithArea]);
 
   const selectedFacility = useMemo(() => {
     const facility = facilities.find(f => f.id === selectedFacilityId);
@@ -89,17 +141,23 @@ function MapPage() {
     return areaSummaries.find(a => a.id === selectedAreaId) ?? areaSummaries[0];
   }, [areaSummaries, selectedAreaId]);
 
+  const riskByArea = useMemo(() => {
+    const map = new Map<string, number>();
+    areaSummaries.forEach(a => map.set(a.id, a.riskScore));
+    return map;
+  }, [areaSummaries]);
+
   const geojsonAreas = useMemo<GeoJSON.FeatureCollection<GeoJSON.Polygon | GeoJSON.MultiPolygon, { id: string; name: string; risk: number }>>(
     () => ({
       type: "FeatureCollection",
       features: areas.map(a => ({
         type: "Feature",
         id: a.id,
-        properties: { id: a.id, name: a.name, risk: a.riskScore ?? 0 },
+        properties: { id: a.id, name: a.name, risk: riskByArea.get(a.id) ?? 0 },
         geometry: a.geom as GeoJSON.Polygon | GeoJSON.MultiPolygon
       }))
     }),
-    [areas]
+    [areas, riskByArea]
   );
 
   const uniqueFacilityTypes = useMemo(() => {
@@ -159,9 +217,23 @@ function MapPage() {
     [tickets]
   );
 
+  const searchHits = useMemo(() => {
+    const source = areaOptions.length ? areaOptions : areas;
+    if (!source.length) return [];
+    const term = searchValue.trim().toLowerCase();
+    return term ? source.filter(a => a.name.toLowerCase().includes(term) || (a.code ?? "").toLowerCase().includes(term)) : source;
+  }, [areaOptions, areas, searchValue]);
+
+  const handleSelectArea = (areaId: string) => {
+    selectArea(areaId);
+    selectFacility(undefined);
+    setRightPanelOpen(true);
+    setIsSearchOpen(false);
+  };
+
   const handleSearch = () => {
-    const hit = areaSummaries.find(a => a.name.includes(searchValue) || a.id === searchValue || a.name.toLowerCase().includes(searchValue.toLowerCase()));
-    if (hit) selectArea(hit.id);
+    const hit = searchHits[0];
+    if (hit?.id) handleSelectArea(hit.id);
   };
 
   return (
@@ -199,9 +271,39 @@ function MapPage() {
             <CardContent className="text-sm text-red-100">{error}</CardContent>
           </Card>
         )}
-        <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-3 flex gap-2 shadow-lg backdrop-blur">
-          <Input placeholder="輸入地址或區域搜尋" value={searchValue} onChange={e => setSearchValue(e.target.value)} onKeyDown={e => e.key === "Enter" && handleSearch()} />
-          <Button onClick={handleSearch}>搜尋</Button>
+        <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-3 shadow-lg backdrop-blur space-y-2">
+          <div className="flex gap-2">
+            <div className="relative flex-1">
+              <Input
+                placeholder="搜尋區域或代碼"
+                value={searchValue}
+                onFocus={() => setIsSearchOpen(true)}
+                onBlur={() => setTimeout(() => setIsSearchOpen(false), 120)}
+                onChange={e => {
+                  setSearchValue(e.target.value);
+                  setIsSearchOpen(true);
+                }}
+                onKeyDown={e => e.key === "Enter" && handleSearch()}
+              />
+              {isSearchOpen && searchHits.length > 0 && (
+                <div className="absolute left-0 right-0 mt-1 rounded-lg border border-slate-800 bg-slate-900/90 shadow-lg text-sm max-h-64 overflow-y-auto z-20">
+                  {searchHits.map(hit => (
+                    <button
+                      key={hit.id}
+                      type="button"
+                      className="w-full px-3 py-2 text-left hover:bg-slate-800"
+                      onMouseDown={e => e.preventDefault()}
+                      onClick={() => handleSelectArea(hit.id)}
+                    >
+                      {hit.name}
+                      {hit.code ? <span className="ml-2 text-xs text-slate-500">{hit.code}</span> : null}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <Button onClick={handleSearch}>搜尋</Button>
+          </div>
         </div>
         <LayerToggles facilityTypes={uniqueFacilityTypes} />
         <PolicyExperimentCard />
@@ -219,7 +321,7 @@ function MapPage() {
           ) : selectedArea ? (
             <AreaCard area={selectedArea} />
           ) : null}
-          {!loading && <NearbyIssues tickets={tickets} areas={areas} selectedAreaId={selectedAreaId} />}
+          {!loading && <NearbyIssues tickets={ticketsWithArea} areas={areas} selectedAreaId={selectedAreaId} />}
         </div>
       )}
 

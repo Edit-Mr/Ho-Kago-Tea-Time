@@ -14,7 +14,7 @@ create table if not exists public.areas (
   code text unique,
 
   -- 新增行政區層級
-  level text not null check (level in ('village','district')),
+  level text not null check (level in ('village','district','county')),
 
   -- 新增拆解欄位（搜尋會爽到不行）
   county text,        -- 新北市、台中市…

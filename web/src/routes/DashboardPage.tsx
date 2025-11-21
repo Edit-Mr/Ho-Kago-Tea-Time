@@ -67,12 +67,22 @@ function DashboardPage() {
     return Object.entries(counts).map(([grade, value]) => ({ grade: grade as "A" | "B" | "C", value }));
   }, [areaFacilities]);
 
+  const derivedRisk = useMemo(() => {
+    const openTickets = areaTickets.filter((t) => t.status !== "completed" && t.status !== "cancelled");
+    const overdueTickets = openTickets.filter((t) => t.slaDueAt && new Date(t.slaDueAt).getTime() < Date.now());
+    return Math.min(100, overdueTickets.length * 25 + (openTickets.length - overdueTickets.length) * 10);
+  }, [areaTickets]);
+
   const trendData = useMemo(() => {
     const rows = areaRiskSnapshots.filter((r) => r.areaId === selectedArea?.id);
+    if (rows.length === 0) {
+      if (!selectedArea?.id) return [];
+      return [{ date: new Date().toISOString().slice(0, 10), score: derivedRisk }];
+    }
     return rows
       .sort((a, b) => new Date(a._computedAtRaw).getTime() - new Date(b._computedAtRaw).getTime())
-      .map((r) => ({ date: r.computedAt, score: r.riskScore }));
-  }, [areaRiskSnapshots, selectedArea?.id]);
+      .map((r) => ({ date: r.computedAt, score: r.riskScore ?? derivedRisk }));
+  }, [areaRiskSnapshots, selectedArea?.id, derivedRisk]);
 
   const searchHits = useMemo(() => {
     const source = areaOptions.length ? areaOptions : areas;

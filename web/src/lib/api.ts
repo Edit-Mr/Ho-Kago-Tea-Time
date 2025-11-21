@@ -51,13 +51,16 @@ export async function submitTicket(formData: TicketFormData): Promise<{ id: stri
 type ApiResult<T> = { data?: T; error?: string };
 
 type AreaSelect = "full" | "lite";
+type AreaLevel = "village" | "district" | "county";
 
-export async function fetchAreas(params?: { county?: string; areaId?: string; select?: AreaSelect }): Promise<ApiResult<Array<{ id: string; name: string; code?: string | null; county: string; populationTotal?: number | null; geom?: GeoJSON.Geometry }>>> {
+export async function fetchAreas(params?: { county?: string; areaId?: string; select?: AreaSelect; level?: AreaLevel }): Promise<ApiResult<Array<{ id: string; name: string; code?: string | null; county: string; populationTotal?: number | null; geom?: GeoJSON.Geometry }>>> {
   if (!supabase) return { error: "Supabase 環境變數未設定" };
   const selectMode: AreaSelect = params?.select ?? "full";
   const selectColumns = selectMode === "full" ? "id,name,code,county,population_total,geom" : "id,name,code,county";
-  const select = supabase.from("areas").select(selectColumns);
-  const query = params?.county ? select.eq("county", params.county) : params?.areaId ? select.eq("id", params.areaId) : select;
+  let query = supabase.from("areas").select(selectColumns);
+  if (params?.county) query = query.eq("county", params.county);
+  if (params?.level) query = query.eq("level", params.level);
+  if (params?.areaId) query = query.eq("id", params.areaId);
   const { data, error } = await query;
   if (error) {
     const msg = error.message?.toLowerCase() ?? "";
