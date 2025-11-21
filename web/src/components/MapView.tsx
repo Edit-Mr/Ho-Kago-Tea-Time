@@ -116,10 +116,10 @@ function MapView({ areasGeoJson, facilities, tickets, onAreaClick, onFacilityCli
         data: facilitiesToFeatureCollection(filteredFacilitiesOnLoad),
         promoteId: "id",
       });
-      
+
       // Add all facility icons upfront
-      addFacilityIcons(map, filteredFacilitiesOnLoad);
-      
+      addFacilityIcons(map, facilities);
+
       map.addLayer({
         id: "facility-icon",
         type: "symbol",
@@ -167,19 +167,41 @@ function MapView({ areasGeoJson, facilities, tickets, onAreaClick, onFacilityCli
         },
       });
 
-      map.on("click", "areas-fill", (e) => {
-        const feature = e.features?.[0];
-        if (feature?.id) clickAreaRef.current?.(String(feature.id));
-      });
+      map.on("click", (e) => {
+        const features = map.queryRenderedFeatures(e.point, {
+          layers: ["facility-icon", "tickets", "areas-fill"],
+        });
 
-      map.on("click", "facility-icon", (e) => {
-        const feature = e.features?.[0];
-        if (feature?.id) clickFacilityRef.current?.(String(feature.id));
-      });
+        if (!features.length) return;
 
-      map.on("click", "tickets", (e) => {
-        const feature = e.features?.[0];
-        if (feature?.id) clickTicketRef.current?.(String(feature.id));
+        // Prioritize icons over areas
+        const facilityFeature = features.find((f) => f.layer.id === "facility-icon");
+        const ticketFeature = features.find((f) => f.layer.id === "tickets");
+        const areaFeature = features.find((f) => f.layer.id === "areas-fill");
+
+        if (facilityFeature) {
+          const id = facilityFeature.id ?? facilityFeature.properties?.id;
+          if (id) {
+            clickFacilityRef.current?.(String(id));
+            return;
+          }
+        }
+
+        if (ticketFeature) {
+          const id = ticketFeature.id ?? ticketFeature.properties?.id;
+          if (id) {
+            clickTicketRef.current?.(String(id));
+            return;
+          }
+        }
+
+        if (areaFeature) {
+          const id = areaFeature.id ?? areaFeature.properties?.id;
+          if (id) {
+            clickAreaRef.current?.(String(id));
+            return;
+          }
+        }
       });
 
       ["facility-icon", "tickets", "areas-fill"].forEach((layerId) => {
@@ -196,7 +218,7 @@ function MapView({ areasGeoJson, facilities, tickets, onAreaClick, onFacilityCli
       map.remove();
       mapRef.current = null;
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -242,6 +264,7 @@ function facilitiesToFeatureCollection(facilities: Facility[]): GeoJSON.FeatureC
         coordinates: facility.coordinates,
       },
       properties: {
+        id: facility.id,
         name: facility.name,
         type: facility.type,
         grade: facility.grade,
@@ -315,6 +338,7 @@ function ticketsToFeatureCollection(tickets: Ticket[]): GeoJSON.FeatureCollectio
         coordinates: ticket.coordinates,
       },
       properties: {
+        id: ticket.id,
         status: ticket.status,
       },
     })),

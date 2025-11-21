@@ -162,6 +162,7 @@ function MapPage() {
           tickets={mapTickets}
           onAreaClick={(id) => {
             selectArea(id);
+            selectFacility(undefined);
             useUiStore.getState().setRightPanelOpen(true);
           }}
           onFacilityClick={(id) => {
