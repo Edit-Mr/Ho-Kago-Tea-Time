@@ -26,7 +26,7 @@ function App() {
         </div>
         <nav className="flex items-center gap-3 text-sm font-medium">
           <NavLink to="/">地圖</NavLink>
-          <NavLink to="/dashboard/demo-area">儀表板</NavLink>
+          <NavLink to="/dashboard">儀表板</NavLink>
           <NavLink to="/admin">管理員</NavLink>
           <NavLink to="/missions">任務牆</NavLink>
         </nav>
@@ -35,6 +35,7 @@ function App() {
       <main className="relative">
         <Routes>
           <Route path="/" element={<MapPage />} />
+          <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/dashboard/:areaId" element={<DashboardPage />} />
           <Route path="/admin" element={<AdminPage />} />
           <Route path="/missions" element={<MissionsPage />} />

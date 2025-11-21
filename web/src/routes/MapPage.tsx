@@ -26,12 +26,22 @@ function MapPage() {
   const facilityTypesMeta = useDataStore((s) => s.facilityTypes);
   const viewport = useMapStore((s) => s.viewport);
 
+  // Initial load uses the starting viewport center; avoid tying to drag/pan to prevent reloads on every move.
   useEffect(() => {
     const areaFromCenter = viewport.center as [number, number];
     loadAll({ center: areaFromCenter }).catch(() => {
       // error handled via store state
     });
-  }, [loadAll, viewport.center]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Allow reloading when a different area is explicitly selected (e.g., via list/search), not on map drags.
+  useEffect(() => {
+    if (!selectedAreaId) return;
+    loadAll({ areaId: selectedAreaId }).catch(() => {
+      // error handled via store state
+    });
+  }, [loadAll, selectedAreaId]);
 
   const areaSummaries: AreaSummary[] = useMemo(() => {
     return areas.map((a) => {

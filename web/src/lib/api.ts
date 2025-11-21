@@ -50,9 +50,15 @@ export async function submitTicket(formData: TicketFormData): Promise<{ id: stri
 
 type ApiResult<T> = { data?: T; error?: string };
 
-export async function fetchAreas(): Promise<ApiResult<Array<{ id: string; name: string; code?: string | null; county: string; populationTotal?: number | null; geom: GeoJSON.Geometry }>>> {
+type AreaSelect = "full" | "lite";
+
+export async function fetchAreas(params?: { county?: string; areaId?: string; select?: AreaSelect }): Promise<ApiResult<Array<{ id: string; name: string; code?: string | null; county: string; populationTotal?: number | null; geom?: GeoJSON.Geometry }>>> {
   if (!supabase) return { error: "Supabase 環境變數未設定" };
-  const { data, error } = await supabase.from("areas").select("id,name,code,county,population_total,geom");
+  const selectMode: AreaSelect = params?.select ?? "full";
+  const selectColumns = selectMode === "full" ? "id,name,code,county,population_total,geom" : "id,name,code,county";
+  const select = supabase.from("areas").select(selectColumns);
+  const query = params?.county ? select.eq("county", params.county) : params?.areaId ? select.eq("id", params.areaId) : select;
+  const { data, error } = await query;
   if (error) {
     const msg = error.message?.toLowerCase() ?? "";
     if (msg.includes("column") && msg.includes("county")) {
@@ -72,13 +78,25 @@ export async function fetchAreas(): Promise<ApiResult<Array<{ id: string; name: 
         code: row.code,
         county: county as string,
         populationTotal: row.population_total,
-        geom: row.geom as GeoJSON.Geometry,
+        geom: (row as any).geom as GeoJSON.Geometry | undefined,
       };
     });
     return { data: mapped };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "areas 資料缺少 county 欄位值" };
   }
+}
+
+export async function fetchAreaByPoint(center: [number, number]): Promise<ApiResult<{ id: string; county: string }>> {
+  if (!supabase) return { error: "Supabase 環境變數未設定" };
+  const [lng, lat] = center;
+  const { data, error } = await supabase.rpc("find_area_by_point", { lng, lat }).select("id,county").single();
+  if (error) {
+    if (error.message?.toLowerCase().includes("find_area_by_point")) return { error: "資料庫缺少 find_area_by_point RPC，請先部署 schema" };
+    return { error: error.message };
+  }
+  if (!data?.id || !data?.county) return { error: "未找到中心點所在行政區，請確認座標與資料庫" };
+  return { data: { id: data.id, county: data.county as string } };
 }
 
 export async function fetchAreaRiskSnapshots(): Promise<ApiResult<Array<{ areaId: string; riskScore: number; computedAt: string; _computedAtRaw: string }>>> {
@@ -168,13 +186,12 @@ export async function fetchFacilityTypes(): Promise<ApiResult<Array<{ type: stri
 export async function fetchFacilityInspections(facilityIds?: string[]): Promise<ApiResult<Array<{ facilityId: string; inspectedAt: string; incidentCountLastYear?: number | null; notes?: string | null }>>> {
   if (!supabase) return { error: "Supabase 環境變數未設定" };
   if (facilityIds && facilityIds.length === 0) return { data: [] };
-  const { data, error } = await supabase
+  let query = supabase
     .from("facility_inspections")
     .select("facility_id,inspected_at,incident_count_last_year,notes")
-    .order("inspected_at", { ascending: false })
-    .modify((q) => {
-      if (facilityIds) q.in("facility_id", facilityIds);
-    });
+    .order("inspected_at", { ascending: false });
+  if (facilityIds) query = query.in("facility_id", facilityIds);
+  const { data, error } = await query;
   if (error) return { error: error.message };
   return {
     data: data?.map((row) => ({
@@ -256,13 +273,12 @@ function missingFunction(error: { message?: string }, functionName: string) {
 export async function fetchTicketEvents(ticketIds?: string[]): Promise<ApiResult<Array<{ ticketId: string; eventType: string; createdAt: string; data?: Record<string, unknown> | null }>>> {
   if (!supabase) return { error: "Supabase 環境變數未設定" };
   if (ticketIds && ticketIds.length === 0) return { data: [] };
-  const { data, error } = await supabase
+  let query = supabase
     .from("ticket_events")
     .select("ticket_id,event_type,created_at,data")
-    .order("created_at", { ascending: true })
-    .modify((q) => {
-      if (ticketIds) q.in("ticket_id", ticketIds);
-    });
+    .order("created_at", { ascending: true });
+  if (ticketIds) query = query.in("ticket_id", ticketIds);
+  const { data, error } = await query;
   if (error) return { error: error.message };
   return {
     data: data?.map((row) => ({

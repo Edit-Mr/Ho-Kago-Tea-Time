@@ -56,7 +56,7 @@ function TicketFormDrawer({ facilityId, facilities = [], areas = [] }: Props) {
     }
     const success = result;
     setSubmitting(false);
-    setToast(`已建立票證 ${success.id}，狀態 ${success.status}`);
+    setToast(`已建立工單 ${success.id}，狀態 ${success.status}`);
     setTimeout(() => setToast(null), 1500);
     close();
   };

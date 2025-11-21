@@ -25,8 +25,8 @@ function AreaCard({ area }: { area: AreaSummary }) {
       </CardHeader>
       <CardContent className="grid grid-cols-2 gap-3">
         <Stat label="設施數" value={area.facilities} />
-        <Stat label="開啟票證" value={area.openTickets} />
-        <Stat label="逾期票證" value={area.overdueTickets} highlight />
+        <Stat label="工單數量" value={area.openTickets} />
+        <Stat label="逾期工單" value={area.overdueTickets} highlight />
       </CardContent>
       <CardContent>
         <Link to={`/dashboard/${area.id}`}>

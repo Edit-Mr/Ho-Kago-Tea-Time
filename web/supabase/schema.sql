@@ -33,6 +33,18 @@ create table if not exists public.areas (
 create index if not exists areas_geom_idx on public.areas using gist (geom);
 create index if not exists areas_county_idx on public.areas (county, town, village);
 
+-- Find containing area for a point (used to decide which county to load)
+create or replace function public.find_area_by_point(lng double precision, lat double precision)
+returns setof public.areas
+language sql
+stable
+as $$
+  select *
+  from public.areas a
+  where st_contains(a.geom, st_setsrid(st_makepoint(lng, lat), 4326))
+  limit 1;
+$$;
+
 -- FACILITIES
 create table if not exists public.facilities (
   id uuid primary key default gen_random_uuid(),
@@ -156,22 +168,6 @@ create table if not exists public.area_risk_snapshots (
   components jsonb
 );
 create index if not exists area_risk_snapshots_idx on public.area_risk_snapshots (area_id, computed_at desc);
-
--- SEED EXAMPLE DATA (optional; remove in prod)
-insert into public.areas (id, name, code, geom, population_total, level)
-select *
-from (
-  values
-    ('00000000-0000-0000-0000-000000000001','西屯區','xitun',
-     st_geomfromtext('MULTIPOLYGON(((120.624 24.192,120.664 24.192,120.664 24.143,120.624 24.143))),4326'), 220000, 'district'),
-
-    ('00000000-0000-0000-0000-000000000002','北區','north',
-     st_geomfromtext('MULTIPOLYGON(((120.683 24.173,120.715 24.173,120.715 24.15,120.683 24.15))),4326'), 140000, 'district'),
-
-    ('00000000-0000-0000-0000-000000000003','南屯區','nantun',
-     st_geomfromtext('MULTIPOLYGON(((120.62 24.155,120.665 24.155,120.665 24.115,120.62 24.115))),4326'), 168000, 'district')
-) as tmp(id, name, code, geom, population_total, level)
-where not exists (select 1 from public.areas limit 1);
 
 insert into public.facilities (id, area_id, type, name, geom, health_grade, last_inspection_at)
 values

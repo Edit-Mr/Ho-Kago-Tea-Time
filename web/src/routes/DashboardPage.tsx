@@ -11,14 +11,25 @@ import { useDataStore } from "../store/dataStore";
 function DashboardPage() {
   const { areaId } = useParams();
   const navigate = useNavigate();
-  const { areas, facilities, tickets, areaRiskSnapshots, loadAll, loading } = useDataStore();
+  const { areas, areaOptions, facilities, tickets, areaRiskSnapshots, loadAll, loading } = useDataStore();
   const [search, setSearch] = useState("");
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
 
   useEffect(() => {
-    loadAll().catch(() => {});
+    // Load names list for search suggestions (lightweight, no geom).
+    loadAll({ lightAreas: true, namesOnly: true }).catch(() => {});
   }, [loadAll]);
 
-  const selectedArea = useMemo(() => areas.find((a) => a.id === areaId) ?? areas[0], [areaId, areas]);
+  useEffect(() => {
+    if (areaId) {
+      loadAll({ areaId, lightAreas: true }).catch(() => {});
+    }
+  }, [loadAll, areaId]);
+
+  const selectedArea = useMemo(
+    () => areas.find((a) => a.id === areaId) ?? areaOptions.find((a) => a.id === areaId) ?? areas[0] ?? areaOptions[0],
+    [areaId, areaOptions, areas]
+  );
 
   const areaFacilities = useMemo(
     () => facilities.filter((f) => f.areaId === selectedArea?.id),
@@ -63,13 +74,15 @@ function DashboardPage() {
       .map((r) => ({ date: r.computedAt, score: r.riskScore }));
   }, [areaRiskSnapshots, selectedArea?.id]);
 
-  const searchHits = useMemo(
-    () =>
-      areas
-        .filter((a) => a.name.includes(search) || (a.code ?? "").includes(search))
-        .slice(0, 5),
-    [areas, search]
-  );
+  const searchHits = useMemo(() => {
+    const source = areaOptions.length ? areaOptions : areas;
+    if (!source.length) return [];
+    const term = search.trim().toLowerCase();
+    const base = term
+      ? source.filter((a) => a.name.toLowerCase().includes(term) || (a.code ?? "").toLowerCase().includes(term))
+      : source;
+    return base;
+  }, [areaOptions, areas, search]);
 
   return (
     <div className="px-6 py-6 space-y-4">
@@ -83,17 +96,27 @@ function DashboardPage() {
             <Input
               placeholder="搜尋區域或代碼"
               value={search}
+              onFocus={() => setIsSearchOpen(true)}
+              onBlur={() => setTimeout(() => setIsSearchOpen(false), 120)}
               onChange={(e) => setSearch(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && searchHits[0] && navigate(`/dashboard/${searchHits[0].id}`)}
             />
-            {search && searchHits.length > 0 && (
-              <div className="absolute left-0 right-0 mt-1 rounded-lg border border-slate-800 bg-slate-900/90 shadow-lg text-sm">
+            {isSearchOpen && searchHits.length > 0 && (
+              <div className="absolute left-0 right-0 mt-1 rounded-lg border border-slate-800 bg-slate-900/90 shadow-lg text-sm max-h-64 overflow-y-auto">
                 {searchHits.map((hit) => (
                   <button
                     key={hit.id}
                     type="button"
                     className="w-full px-3 py-2 text-left hover:bg-slate-800"
-                    onClick={() => navigate(`/dashboard/${hit.id}`)}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => {
+                      if (hit.id) {
+                        navigate(`/dashboard/${hit.id}`);
+                      } else {
+                        navigate("/dashboard");
+                      }
+                      setIsSearchOpen(false);
+                    }}
                   >
                     {hit.name}
                   </button>
@@ -109,8 +132,8 @@ function DashboardPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <SummaryCard title="設施數" value={stats.facilities} />
-        <SummaryCard title="開啟票證" value={stats.openTickets} />
-        <SummaryCard title="逾期票證" value={stats.overdueTickets} highlight />
+        <SummaryCard title="工單數量" value={stats.openTickets} />
+        <SummaryCard title="逾期工單" value={stats.overdueTickets} highlight />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-7 gap-4">
@@ -135,7 +158,7 @@ function DashboardPage() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card>
           <CardHeader>
-            <CardTitle>票證類型分佈</CardTitle>
+            <CardTitle>工單類型分佈</CardTitle>
           </CardHeader>
           <CardContent>
             <TicketByTypeChart data={ticketTypesData} />

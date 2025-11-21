@@ -1,16 +1,18 @@
 import { create } from "zustand";
 import type GeoJSON from "geojson";
-import { fetchAreaRiskSnapshots, fetchAreas, fetchFacilities, fetchFacilityInspections, fetchFacilityTypes, fetchTicketEvents, fetchTickets } from "../lib/api";
+import { fetchAreaByPoint, fetchAreaRiskSnapshots, fetchAreas, fetchFacilities, fetchFacilityInspections, fetchFacilityTypes, fetchTicketEvents, fetchTickets } from "../lib/api";
 
 export type AreaRecord = {
   id: string;
   name: string;
   code?: string | null;
   county: string;
-  geom: GeoJSON.Geometry;
+  geom?: GeoJSON.Geometry;
   populationTotal?: number | null;
   riskScore?: number;
 };
+
+type AreaOption = Pick<AreaRecord, "id" | "name" | "code" | "county">;
 
 export type FacilityRecord = {
   id: string;
@@ -50,33 +52,80 @@ export type TicketEventRecord = {
 
 type DataState = {
   areas: AreaRecord[];
+  areaOptions: AreaOption[];
   facilities: FacilityRecord[];
   tickets: TicketRecord[];
   ticketEvents: TicketEventRecord[];
   areaRiskSnapshots: Array<{ areaId: string; riskScore: number; computedAt: string; _computedAtRaw: string }>;
   facilityTypes: Array<{ type: string; labelZh: string; emoji?: string | null; iconName?: string | null }>;
   currentAreaId?: string;
+  currentCounty?: string;
   loading: boolean;
   error?: string;
-  loadAll: (opts?: { areaId?: string; center?: [number, number] }) => Promise<void>;
+  loadAll: (opts?: { areaId?: string; center?: [number, number]; lightAreas?: boolean; namesOnly?: boolean }) => Promise<void>;
 };
 
 export const useDataStore = create<DataState>((set, get) => ({
   areas: [],
+  areaOptions: [],
   facilities: [],
   tickets: [],
   ticketEvents: [],
   areaRiskSnapshots: [],
   facilityTypes: [],
   currentAreaId: undefined,
+  currentCounty: undefined,
   loading: false,
   error: undefined,
   loadAll: async (opts) => {
-    set({ loading: true, error: undefined });
     try {
-      const [areasRes, riskRes, facilityTypesRes] = await Promise.all([fetchAreas(), fetchAreaRiskSnapshots(), fetchFacilityTypes()]);
+      const stateBeforeFetch = get();
+      if (!opts?.lightAreas && opts?.center && stateBeforeFetch.currentCounty && stateBeforeFetch.areas.length > 0) {
+        const insideExistingCounty = stateBeforeFetch.areas.some((a) => a.county === stateBeforeFetch.currentCounty && a.geom && isPointInsideGeometry(opts.center as [number, number], a.geom));
+        if (insideExistingCounty) {
+          return;
+        }
+      }
+
+      const onlyNeedLightAreas = !!opts?.lightAreas && !opts?.areaId && !opts?.center;
+      const namesOnly = !!opts?.namesOnly;
+      set({ loading: !namesOnly, error: undefined });
+
+      let countyFilter: string | undefined;
+      let areaFromPoint: { id: string; county: string } | undefined;
+      const needsGeom = !opts?.lightAreas || !!opts?.center;
+      if (opts?.center && needsGeom) {
+        const areaByPoint = await fetchAreaByPoint(opts.center);
+        if (areaByPoint.error) throw new Error(areaByPoint.error);
+        areaFromPoint = areaByPoint.data;
+        countyFilter = areaFromPoint?.county;
+      }
+
+      countyFilter = countyFilter ?? get().currentCounty;
+
+      const stateAfterAreaLookup = get();
+      const tentativeAreaId = opts?.areaId ?? areaFromPoint?.id;
+      if (
+        tentativeAreaId &&
+        countyFilter &&
+        stateAfterAreaLookup.currentAreaId === tentativeAreaId &&
+        stateAfterAreaLookup.currentCounty === countyFilter &&
+        stateAfterAreaLookup.facilities.length > 0 &&
+        stateAfterAreaLookup.tickets.length > 0
+      ) {
+        set({ loading: false });
+        return;
+      }
+
+      const areaSelect = needsGeom ? "full" : "lite";
+      const areasRes = await fetchAreas(
+        countyFilter
+          ? { county: countyFilter, select: areaSelect }
+          : tentativeAreaId
+            ? { areaId: tentativeAreaId, select: areaSelect }
+            : { select: areaSelect }
+      );
       if (areasRes.error) throw new Error(areasRes.error);
-      if (facilityTypesRes.error) throw new Error(facilityTypesRes.error);
 
       const areas = areasRes.data?.map((a) => ({
         id: a.id,
@@ -89,7 +138,31 @@ export const useDataStore = create<DataState>((set, get) => ({
       })) ?? [];
       if (areas.some((a) => !a.county)) throw new Error("區域資料缺少 county 欄位或值，請確認資料庫縣市欄位已填寫");
 
-      const targetAreaId = opts?.areaId ?? pickAreaByCenter(areas, opts?.center) ?? areas[0]?.id;
+      if (onlyNeedLightAreas && namesOnly) {
+        set((prev) => ({
+          areas,
+          areaOptions: areas.map(({ id, name, code, county }) => ({ id, name, code, county })),
+          // 保留既有的詳細資料，僅更新選單
+          facilities: prev.facilities,
+          tickets: prev.tickets,
+          facilityTypes: prev.facilityTypes,
+          currentAreaId: prev.currentAreaId,
+          currentCounty: prev.currentCounty,
+          ticketEvents: prev.ticketEvents,
+          areaRiskSnapshots: prev.areaRiskSnapshots,
+          loading: false,
+          error: undefined,
+        }));
+        return;
+      }
+
+      const targetAreaId = opts?.areaId
+        ? opts.areaId
+        : areaFromPoint?.id
+          ? areaFromPoint.id
+          : needsGeom
+            ? pickAreaByCenter(areas.filter((a) => a.geom) as AreaRecord[], opts?.center)
+            : areas[0]?.id;
       if (!targetAreaId) throw new Error("找不到可用的行政區，無法載入地圖資料");
       if (targetAreaId && get().currentAreaId === targetAreaId && get().facilities.length > 0) {
         set({ loading: false });
@@ -99,6 +172,9 @@ export const useDataStore = create<DataState>((set, get) => ({
       const [facilitiesRes, ticketsRes] = await Promise.all([fetchFacilities(targetAreaId), fetchTickets(targetAreaId)]);
       if (facilitiesRes.error) throw new Error(facilitiesRes.error);
       if (ticketsRes.error) throw new Error(ticketsRes.error);
+
+      const [riskRes, facilityTypesRes] = await Promise.all([fetchAreaRiskSnapshots(), fetchFacilityTypes()]);
+      if (facilityTypesRes.error) throw new Error(facilityTypesRes.error);
 
       const facilityIds = facilitiesRes.data?.map((f) => f.id) ?? [];
       const ticketIds = ticketsRes.data?.map((t) => t.id) ?? [];
@@ -176,10 +252,12 @@ export const useDataStore = create<DataState>((set, get) => ({
 
       set({
         areas: filteredAreas,
+        areaOptions: get().areaOptions.length > 0 ? get().areaOptions : areas.map(({ id, name, code, county }) => ({ id, name, code, county })),
         facilities,
         tickets,
         facilityTypes: facilityTypesRes.data ?? [],
         currentAreaId: targetAreaId,
+        currentCounty: targetArea?.county ?? countyFilter,
         ticketEvents: ticketEventsRes.data ?? [],
         areaRiskSnapshots: filteredRisk,
         loading: false,
