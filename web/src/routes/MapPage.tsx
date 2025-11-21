@@ -130,8 +130,14 @@ function MapPage() {
           areasGeoJson={geojsonAreas}
           facilities={mapFacilities}
           tickets={mapTickets}
-          onAreaClick={selectArea}
-          onFacilityClick={selectFacility}
+          onAreaClick={(id) => {
+            selectArea(id);
+            useUiStore.getState().setRightPanelOpen(true);
+          }}
+          onFacilityClick={(id) => {
+            selectFacility(id);
+            useUiStore.getState().setRightPanelOpen(true);
+          }}
           onTicketClick={(id) => {
             // eslint-disable-next-line no-console
             console.log("Clicked ticket", id);
@@ -179,9 +185,8 @@ function MapPage() {
 
       <button
         onClick={toggleRightPanel}
-        className={`absolute top-4 z-20 px-3 py-2 rounded-lg bg-slate-900/80 border border-slate-700 text-xs text-slate-200 inline-flex items-center gap-2 transition-all ${
-          isRightPanelOpen ? "right-[24rem]" : "right-4"
-        }`}
+        className={`absolute top-4 z-20 px-3 py-2 rounded-lg bg-slate-900/80 border border-slate-700 text-xs text-slate-200 inline-flex items-center gap-2 transition-all ${isRightPanelOpen ? "right-[24rem]" : "right-4"
+          }`}
         aria-label={isRightPanelOpen ? "Hide info panel" : "Show info panel"}
       >
         {isRightPanelOpen ? <EyeOff className="h-4 w-4" aria-hidden /> : <Eye className="h-4 w-4" aria-hidden />}
