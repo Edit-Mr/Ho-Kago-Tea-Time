@@ -9,16 +9,15 @@ import { submitTicket, type TicketFormData } from "../lib/api";
 
 type Props = {
   facilityId?: string;
-  facilities?: Array<{ id: string; name: string; areaId?: string | null; coords?: [number, number] }>;
+  facilities?: Array<{ id: string; name: string; coords?: [number, number] }>;
   areas?: Array<{ id: string; name: string }>;
 };
 
-function TicketFormDrawer({ facilityId, facilities = [], areas = [] }: Props) {
+function TicketFormDrawer({ facilityId, facilities = [] }: Props) {
   const isOpen = useUiStore((s) => s.isTicketFormOpen);
   const close = useUiStore((s) => s.closeTicketForm);
   const [form, setForm] = useState<TicketFormData>({
     facilityId,
-    areaId: facilities.find((f) => f.id === facilityId)?.areaId ?? areas[0]?.id,
     issueType: "safety",
     severity: "medium",
     description: "",
@@ -28,8 +27,6 @@ function TicketFormDrawer({ facilityId, facilities = [], areas = [] }: Props) {
   const [toast, setToast] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const selectedFacility = facilities.find((f) => f.id === form.facilityId);
-
   // Keep facility selection in sync with map highlight
   useEffect(() => {
     if (!facilityId) return;
@@ -37,7 +34,6 @@ function TicketFormDrawer({ facilityId, facilities = [], areas = [] }: Props) {
     setForm((prev) => ({
       ...prev,
       facilityId,
-      areaId: facility?.areaId ?? prev.areaId,
       coordinates: facility?.coords ?? prev.coordinates,
     }));
   }, [facilityId, facilities]);
@@ -71,7 +67,7 @@ function TicketFormDrawer({ facilityId, facilities = [], areas = [] }: Props) {
             onChange={(e) => {
               const newFacilityId = e.target.value || undefined;
               const facility = facilities.find((f) => f.id === newFacilityId);
-              update({ facilityId: newFacilityId, areaId: facility?.areaId ?? form.areaId, coordinates: facility?.coords });
+              update({ facilityId: newFacilityId, coordinates: facility?.coords });
             }}
           >
             <option value="">未指定</option>
@@ -79,18 +75,6 @@ function TicketFormDrawer({ facilityId, facilities = [], areas = [] }: Props) {
               <option key={f.id} value={f.id}>
                 {f.name}
               </option>
-            ))}
-          </Select>
-          {selectedFacility?.areaId && (
-            <p className="text-xs text-slate-400 pt-1">屬於：{areas.find((a) => a.id === selectedFacility.areaId)?.name ?? selectedFacility.areaId}</p>
-          )}
-        </div>
-
-        <div>
-          <label className="text-sm text-slate-300">行政區</label>
-          <Select value={form.areaId ?? ""} onChange={(e) => update({ areaId: e.target.value })}>
-            {areas.map((a) => (
-              <option key={a.id} value={a.id}>{a.name}</option>
             ))}
           </Select>
         </div>

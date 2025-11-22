@@ -11,7 +11,6 @@ export async function sendChat(messages: ChatMessage[]): Promise<ChatMessage> {
 
 export type TicketFormData = {
   facilityId?: string;
-  areaId?: string;
   issueType: string;
   severity: "low" | "medium" | "high";
   description: string;
@@ -24,13 +23,12 @@ const severityMap: Record<TicketFormData["severity"], number> = { low: 1, medium
 export async function submitTicket(formData: TicketFormData): Promise<{ id: string; status: string } | { error: string }> {
   try {
     if (!supabase) throw new Error("Supabase 未設定，請設定 VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY");
-    const { facilityId, areaId, coordinates } = formData;
+    const { facilityId, coordinates } = formData;
     const geom = coordinates ? { type: "Point", coordinates } satisfies GeoJSON.Point : null;
     const { data, error } = await supabase
       .from("tickets")
       .insert({
         facility_id: facilityId ?? null,
-        area_id: areaId ?? null,
         geom,
         source: "citizen",
         type: formData.issueType,
@@ -119,18 +117,17 @@ export async function fetchAreaRiskSnapshots(): Promise<ApiResult<Array<{ areaId
   };
 }
 
-export async function fetchFacilities(areaId?: string): Promise<ApiResult<Array<{ id: string; areaId?: string | null; type: string; name: string; geom: GeoJSON.Geometry; healthGrade?: string | null; lastInspectionAt?: string | null }>>> {
+export async function fetchFacilities(areaId?: string): Promise<ApiResult<Array<{ id: string; type: string; name: string; geom: GeoJSON.Geometry; healthGrade?: string | null; lastInspectionAt?: string | null }>>> {
   if (!supabase) return { error: "Supabase 環境變數未設定" };
-  const selectFields = "id,area_id,type,name,geom,health_grade,last_inspection_at";
+  const selectFields = "id,type,name,geom,health_grade,last_inspection_at";
 
-  // Prefer DB-side spatial filtering so facilities without area_id but located in the city are included.
+  // Use DB-side spatial filtering for area-specific queries
   if (areaId) {
     const { data: spatialData, error: spatialError } = await supabase.rpc("facilities_in_area", { target_area_id: areaId });
     if (!spatialError && spatialData) {
       return {
         data: spatialData.map((row) => ({
           id: row.id,
-          areaId: row.area_id,
           type: row.type,
           name: row.name,
           geom: row.geom as GeoJSON.Geometry,
@@ -140,21 +137,6 @@ export async function fetchFacilities(areaId?: string): Promise<ApiResult<Array<
       };
     }
     if (spatialError && !missingFunction(spatialError, "facilities_in_area")) return { error: spatialError.message };
-    // Fall back to simple area_id filter if the RPC is unavailable (older schema).
-    const base = supabase.from("facilities").select(selectFields);
-    const { data, error } = await base.eq("area_id", areaId);
-    if (error) return { error: error.message };
-    return {
-      data: data?.map((row) => ({
-        id: row.id,
-        areaId: row.area_id,
-        type: row.type,
-        name: row.name,
-        geom: row.geom as GeoJSON.Geometry,
-        healthGrade: row.health_grade,
-        lastInspectionAt: row.last_inspection_at,
-      })),
-    };
   }
 
   const { data, error } = await supabase.from("facilities").select(selectFields);
@@ -162,7 +144,6 @@ export async function fetchFacilities(areaId?: string): Promise<ApiResult<Array<
   return {
     data: data?.map((row) => ({
       id: row.id,
-      areaId: row.area_id,
       type: row.type,
       name: row.name,
       geom: row.geom as GeoJSON.Geometry,
@@ -206,9 +187,9 @@ export async function fetchFacilityInspections(facilityIds?: string[]): Promise<
   };
 }
 
-export async function fetchTickets(areaId?: string): Promise<ApiResult<Array<{ id: string; areaId?: string | null; facilityId?: string | null; geom?: GeoJSON.Geometry | null; status: string; type: string; severity?: number | null; slaDueAt?: string | null; createdAt?: string | null; description?: string | null; photoUrls?: string[] | null }>>> {
+export async function fetchTickets(areaId?: string): Promise<ApiResult<Array<{ id: string; facilityId?: string | null; geom?: GeoJSON.Geometry | null; status: string; type: string; severity?: number | null; slaDueAt?: string | null; createdAt?: string | null; description?: string | null; photoUrls?: string[] | null }>>> {
   if (!supabase) return { error: "Supabase 環境變數未設定" };
-  const selectFields = "id,area_id,facility_id,geom,status,type,severity,sla_due_at,created_at,description,photo_urls";
+  const selectFields = "id,facility_id,geom,status,type,severity,sla_due_at,created_at,description,photo_urls";
 
   if (areaId) {
     const { data: spatialData, error: spatialError } = await supabase.rpc("tickets_in_area", { target_area_id: areaId });
@@ -216,7 +197,6 @@ export async function fetchTickets(areaId?: string): Promise<ApiResult<Array<{ i
       return {
         data: spatialData.map((row) => ({
           id: row.id,
-          areaId: row.area_id,
           facilityId: row.facility_id,
           geom: row.geom as GeoJSON.Geometry | null,
           status: row.status,
@@ -230,24 +210,6 @@ export async function fetchTickets(areaId?: string): Promise<ApiResult<Array<{ i
       };
     }
     if (spatialError && !missingFunction(spatialError, "tickets_in_area")) return { error: spatialError.message };
-    const base = supabase.from("tickets").select(selectFields);
-    const { data, error } = await base.eq("area_id", areaId);
-    if (error) return { error: error.message };
-    return {
-      data: data?.map((row) => ({
-        id: row.id,
-        areaId: row.area_id,
-        facilityId: row.facility_id,
-        geom: row.geom as GeoJSON.Geometry | null,
-        status: row.status,
-        type: row.type,
-        severity: row.severity,
-        slaDueAt: row.sla_due_at,
-        createdAt: row.created_at,
-        description: row.description,
-        photoUrls: row.photo_urls,
-      })),
-    };
   }
 
   const { data, error } = await supabase.from("tickets").select(selectFields);
@@ -255,7 +217,6 @@ export async function fetchTickets(areaId?: string): Promise<ApiResult<Array<{ i
   return {
     data: data?.map((row) => ({
       id: row.id,
-      areaId: row.area_id,
       facilityId: row.facility_id,
       geom: row.geom as GeoJSON.Geometry | null,
       status: row.status,

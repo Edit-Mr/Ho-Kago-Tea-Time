@@ -16,7 +16,6 @@ type AreaOption = Pick<AreaRecord, "id" | "name" | "code" | "county">;
 
 export type FacilityRecord = {
   id: string;
-  areaId?: string | null;
   type: string;
   typeLabel?: string;
   typeEmoji?: string | null;
@@ -31,7 +30,6 @@ export type FacilityRecord = {
 
 export type TicketRecord = {
   id: string;
-  areaId?: string | null;
   facilityId?: string | null;
   coords?: [number, number];
   status: string;
@@ -81,6 +79,12 @@ export const useDataStore = create<DataState>((set, get) => ({
     try {
       const onlyNeedLightAreas = !!opts?.lightAreas && !opts?.areaId && !opts?.center;
       const namesOnly = !!opts?.namesOnly;
+
+      // If only need names and we already have areaOptions, skip
+      if (onlyNeedLightAreas && namesOnly && get().areaOptions.length > 0) {
+        return;
+      }
+
       set({ loading: !namesOnly, error: undefined });
 
       let countyFilter: string | undefined;
@@ -211,7 +215,6 @@ export const useDataStore = create<DataState>((set, get) => ({
         const meta = typeMeta.get(f.type);
         return {
           id: f.id,
-          areaId: f.areaId,
           type: f.type,
           typeLabel: meta?.labelZh ?? undefined,
           typeEmoji: meta?.emoji ?? null,
@@ -227,7 +230,6 @@ export const useDataStore = create<DataState>((set, get) => ({
 
       const tickets = ticketsRes.data?.map((t) => ({
         id: t.id,
-        areaId: t.areaId,
         facilityId: t.facilityId,
         coords: (t.geom as GeoJSON.Point | undefined)?.coordinates as [number, number] | undefined,
         status: t.status,
@@ -250,9 +252,8 @@ export const useDataStore = create<DataState>((set, get) => ({
         : areasWithRisk.filter((a) => a.id === targetAreaId);
       const filteredRisk = (riskRes.data ?? []).filter((r) => filteredAreas.some((a) => a.id === r.areaId));
 
-      const allowedAreaIds = new Set(filteredAreas.map((a) => a.id));
+      // Filter facilities by geometry - only include facilities within the filtered areas
       const facilities = facilitiesMapped.filter((f) => {
-        if (f.areaId && allowedAreaIds.has(f.areaId)) return true;
         if (!f.coords) return false;
         return filteredAreas.some((a) => a.geom && isPointInsideGeometry(f.coords as [number, number], a.geom as GeoJSON.Geometry));
       });

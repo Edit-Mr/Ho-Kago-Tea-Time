@@ -48,7 +48,6 @@ $$;
 -- FACILITIES
 create table if not exists public.facilities (
   id uuid primary key default gen_random_uuid(),
-  area_id uuid references public.areas(id) on delete set null,
   type text not null check (type in ('park','playground','street_light','tree','toilet','other','road_hazard','police_station','sidewalk','drinking_fountain','elder_center','school_zone')),
   name text not null,
   geom geometry(Point,4326) not null,
@@ -56,9 +55,8 @@ create table if not exists public.facilities (
   last_inspection_at timestamptz
 );
 create index if not exists facilities_geom_idx on public.facilities using gist (geom);
-create index if not exists facilities_area_idx on public.facilities (area_id);
 
--- Helper to select facilities inside a given area (including null area_id but spatially inside)
+-- Helper to select facilities inside a given area (pure geometry-based)
 create or replace function public.facilities_in_area(target_area_id uuid)
 returns setof public.facilities
 language sql
@@ -67,8 +65,7 @@ as $$
   select f.*
   from public.facilities f
   join public.areas a on a.id = target_area_id
-  where f.area_id = target_area_id
-     or (f.area_id is null and st_within(f.geom, a.geom));
+  where st_within(f.geom, a.geom);
 $$;
 
 -- FACILITY TYPE META (single source of truth for labels & emoji)
@@ -115,7 +112,6 @@ create index if not exists facility_inspections_facility_idx on public.facility_
 -- TICKETS
 create table if not exists public.tickets (
   id uuid primary key default gen_random_uuid(),
-  area_id uuid references public.areas(id) on delete set null,
   facility_id uuid references public.facilities(id) on delete set null,
   geom geometry(Point,4326),
   source text check (source in ('citizen','inspection','system')),
@@ -133,7 +129,6 @@ create table if not exists public.tickets (
   photo_urls text[]
 );
 create index if not exists tickets_geom_idx on public.tickets using gist (geom);
-create index if not exists tickets_area_idx on public.tickets (area_id);
 create index if not exists tickets_facility_idx on public.tickets (facility_id);
 create index if not exists tickets_status_idx on public.tickets (status);
 
@@ -145,8 +140,7 @@ as $$
   select t.*
   from public.tickets t
   join public.areas a on a.id = target_area_id
-  where t.area_id = target_area_id
-     or (t.area_id is null and t.geom is not null and st_within(t.geom, a.geom));
+  where t.geom is not null and st_within(t.geom, a.geom);
 $$;
 
 -- TICKET EVENTS
@@ -169,26 +163,26 @@ create table if not exists public.area_risk_snapshots (
 );
 create index if not exists area_risk_snapshots_idx on public.area_risk_snapshots (area_id, computed_at desc);
 
-insert into public.facilities (id, area_id, type, name, geom, health_grade, last_inspection_at)
+insert into public.facilities (id, type, name, geom, health_grade, last_inspection_at)
 values
-  ('10000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000001','park','黎明公園', st_setsrid(st_makepoint(120.646,24.16),4326),'B','2024-10-05'),
-  ('10000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000001','street_light','福康五街路燈 #12', st_setsrid(st_makepoint(120.655,24.172),4326),'A','2024-11-10'),
-  ('10000000-0000-0000-0000-000000000003','00000000-0000-0000-0000-000000000001','park','文心森林公園', st_setsrid(st_makepoint(120.64,24.158),4326),'C','2024-08-20'),
-  ('10000000-0000-0000-0000-000000000004','00000000-0000-0000-0000-000000000001','street_light','福星北路路燈 #21', st_setsrid(st_makepoint(120.649,24.177),4326),'B','2024-11-05'),
-  ('10000000-0000-0000-0000-000000000005','00000000-0000-0000-0000-000000000001','police_station','西屯分局', st_setsrid(st_makepoint(120.648,24.164),4326),'A','2024-11-01'),
-  ('10000000-0000-0000-0000-000000000006','00000000-0000-0000-0000-000000000001','sidewalk','逢甲商圈人行道', st_setsrid(st_makepoint(120.6455,24.174),4326),'B','2024-09-02'),
-  ('10000000-0000-0000-0000-000000000007','00000000-0000-0000-0000-000000000002','park','崇德公園', st_setsrid(st_makepoint(120.69,24.163),4326),'B','2024-10-15'),
-  ('10000000-0000-0000-0000-000000000008','00000000-0000-0000-0000-000000000003','elder_center','南屯區樂齡中心', st_setsrid(st_makepoint(120.637,24.135),4326),'A','2024-10-30'),
-  ('10000000-0000-0000-0000-000000000009','00000000-0000-0000-0000-000000000001','drinking_fountain','草悟道飲水機', st_setsrid(st_makepoint(120.6605,24.159),4326),'B','2024-10-28')
+  ('10000000-0000-0000-0000-000000000001','park','黎明公園', st_setsrid(st_makepoint(120.646,24.16),4326),'B','2024-10-05'),
+  ('10000000-0000-0000-0000-000000000002','street_light','福康五街路燈 #12', st_setsrid(st_makepoint(120.655,24.172),4326),'A','2024-11-10'),
+  ('10000000-0000-0000-0000-000000000003','park','文心森林公園', st_setsrid(st_makepoint(120.64,24.158),4326),'C','2024-08-20'),
+  ('10000000-0000-0000-0000-000000000004','street_light','福星北路路燈 #21', st_setsrid(st_makepoint(120.649,24.177),4326),'B','2024-11-05'),
+  ('10000000-0000-0000-0000-000000000005','police_station','西屯分局', st_setsrid(st_makepoint(120.648,24.164),4326),'A','2024-11-01'),
+  ('10000000-0000-0000-0000-000000000006','sidewalk','逢甲商圈人行道', st_setsrid(st_makepoint(120.6455,24.174),4326),'B','2024-09-02'),
+  ('10000000-0000-0000-0000-000000000007','park','崇德公園', st_setsrid(st_makepoint(120.69,24.163),4326),'B','2024-10-15'),
+  ('10000000-0000-0000-0000-000000000008','elder_center','南屯區樂齡中心', st_setsrid(st_makepoint(120.637,24.135),4326),'A','2024-10-30'),
+  ('10000000-0000-0000-0000-000000000009','drinking_fountain','草悟道飲水機', st_setsrid(st_makepoint(120.6605,24.159),4326),'B','2024-10-28')
 on conflict do nothing;
 
-insert into public.tickets (id, area_id, facility_id, geom, source, type, severity, status, created_at, sla_days, sla_due_at, estimated_cost, risk_impact, description)
+insert into public.tickets (id, facility_id, geom, source, type, severity, status, created_at, sla_days, sla_due_at, estimated_cost, risk_impact, description)
 values
-  ('20000000-0000-0000-0000-000000000001','00000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000001', st_setsrid(st_makepoint(120.645,24.165),4326),'citizen','park_damage',2,'open','2024-10-20',30,'2024-11-19',50000,12,'滑梯鬆動'),
-  ('20000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000002',null, st_setsrid(st_makepoint(120.69,24.16),4326),'inspection','pothole',3,'assigned','2024-10-25',20,'2024-11-14',80000,18,'道路坑洞'),
-  ('20000000-0000-0000-0000-000000000003','00000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000003', st_setsrid(st_makepoint(120.64,24.158),4326),'citizen','park_lighting',2,'in_progress','2024-09-12',45,'2024-10-27',40000,15,'夜間照明不足'),
-  ('20000000-0000-0000-0000-000000000004','00000000-0000-0000-0000-000000000001',null, st_setsrid(st_makepoint(120.641,24.157),4326),'citizen','road_pothole',3,'in_progress','2024-09-10',60,'2024-11-09',120000,20,'黎明路坑洞 2 處'),
-  ('20000000-0000-0000-0000-000000000005','00000000-0000-0000-0000-000000000003','10000000-0000-0000-0000-000000000008', st_setsrid(st_makepoint(120.637,24.135),4326),'inspection','facility_check',1,'open','2024-10-30',30,'2024-11-29',30000,5,'樂齡中心例行檢查')
+  ('20000000-0000-0000-0000-000000000001','10000000-0000-0000-0000-000000000001', st_setsrid(st_makepoint(120.645,24.165),4326),'citizen','park_damage',2,'open','2024-10-20',30,'2024-11-19',50000,12,'滑梯鬆動'),
+  ('20000000-0000-0000-0000-000000000002',null, st_setsrid(st_makepoint(120.69,24.16),4326),'inspection','pothole',3,'assigned','2024-10-25',20,'2024-11-14',80000,18,'道路坑洞'),
+  ('20000000-0000-0000-0000-000000000003','10000000-0000-0000-0000-000000000003', st_setsrid(st_makepoint(120.64,24.158),4326),'citizen','park_lighting',2,'in_progress','2024-09-12',45,'2024-10-27',40000,15,'夜間照明不足'),
+  ('20000000-0000-0000-0000-000000000004',null, st_setsrid(st_makepoint(120.641,24.157),4326),'citizen','road_pothole',3,'in_progress','2024-09-10',60,'2024-11-09',120000,20,'黎明路坑洞 2 處'),
+  ('20000000-0000-0000-0000-000000000005','10000000-0000-0000-0000-000000000008', st_setsrid(st_makepoint(120.637,24.135),4326),'inspection','facility_check',1,'open','2024-10-30',30,'2024-11-29',30000,5,'樂齡中心例行檢查')
 on conflict do nothing;
 
 insert into public.area_risk_snapshots (id, area_id, computed_at, risk_score, components)

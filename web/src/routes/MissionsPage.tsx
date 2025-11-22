@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import type GeoJSON from "geojson";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -14,6 +15,26 @@ type ReportForm = {
   note: string;
   photo?: File | null;
 };
+
+function isPointInsideGeometry(point: [number, number], geom?: GeoJSON.Geometry): boolean {
+  if (!geom) return false;
+  if (geom.type === "Polygon") return isPointInPolygon(point, geom.coordinates as GeoJSON.Position[][]);
+  if (geom.type === "MultiPolygon") return (geom.coordinates as GeoJSON.Position[][][]).some(poly => isPointInPolygon(point, poly));
+  return false;
+}
+
+function isPointInPolygon(point: [number, number], rings: GeoJSON.Position[][]): boolean {
+  const [lng, lat] = point;
+  let inside = false;
+  const ring = rings[0];
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0], yi = ring[i][1];
+    const xj = ring[j][0], yj = ring[j][1];
+    const intersect = yi > lat !== yj > lat && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
 
 function MissionsPage() {
   const [area, setArea] = useState("all");
@@ -34,7 +55,12 @@ function MissionsPage() {
         const last = f.lastInspection ? new Date(f.lastInspection).getTime() : Date.now();
         const nextDue = last + 30 * 24 * 60 * 60 * 1000;
         const daysLeft = Math.max(0, Math.round((nextDue - Date.now()) / (1000 * 60 * 60 * 24)));
-        const areaName = areas.find((a) => a.id === f.areaId)?.name ?? "未指定";
+        // Find area by geometry
+        let areaName = "未指定";
+        if (f.coords) {
+          const foundArea = areas.find((a) => a.geom && isPointInsideGeometry(f.coords as [number, number], a.geom as GeoJSON.Geometry));
+          if (foundArea) areaName = foundArea.name;
+        }
         return {
           id: f.id,
           name: f.name,
@@ -42,6 +68,7 @@ function MissionsPage() {
           typeLabel: f.typeLabel ?? f.type,
           typeEmoji: f.typeEmoji ?? undefined,
           area: areaName,
+          areaId: areas.find((a) => a.geom && f.coords && isPointInsideGeometry(f.coords, a.geom as GeoJSON.Geometry))?.id,
           dueInDays: daysLeft,
           lastInspection: f.lastInspection?.slice(0, 10) ?? "—",
         };
@@ -51,12 +78,12 @@ function MissionsPage() {
 
   const filtered = useMemo(() => {
     return upcomingInspections.filter((item) => {
-      const matchesArea = area === "all" || facilities.find((f) => f.id === item.id)?.areaId === area;
+      const matchesArea = area === "all" || item.areaId === area;
       const matchesType = type === "all" || item.type === type;
       const matchesKeyword = keyword ? item.name.includes(keyword) || item.area.includes(keyword) : true;
       return matchesArea && matchesType && matchesKeyword;
     });
-  }, [area, facilities, keyword, type, upcomingInspections]);
+  }, [area, keyword, type, upcomingInspections]);
 
   const areaOptions = useMemo(() => [{ id: "all", name: "全部區域" }, ...areas], [areas]);
 

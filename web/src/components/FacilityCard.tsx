@@ -114,7 +114,6 @@ function FacilityCard({ facility }: { facility: Facility }) {
         </div>
         <div className="pt-3 flex gap-2">
           <Button onClick={openTicketForm}>回報問題 / Report issue</Button>
-          <Button variant="secondary">狀態良好</Button>
         </div>
       </CardContent>
     </Card>

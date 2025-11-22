@@ -83,7 +83,12 @@ export const useMapStore = create<MapStore>((set) => ({
       // When the user manually toggles layers, switch to custom scenario to reflect manual overrides.
       return { activeLayers: nextLayers, selectedScenario: "custom" };
     }),
-  selectFacility: (selectedFacilityId) => set({ selectedFacilityId }),
+  selectFacility: (selectedFacilityId) =>
+    set((state) => ({
+      selectedFacilityId,
+      // Clear area selection when focusing a facility to avoid stale "nearby" panels.
+      selectedAreaId: selectedFacilityId ? undefined : state.selectedAreaId,
+    })),
   selectArea: (selectedAreaId) => set({ selectedAreaId }),
   toggleFacilityType: (type) =>
     set((state) => {

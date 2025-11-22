@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type GeoJSON from "geojson";
 import MapView from "../components/MapView";
 import LayerToggles from "../components/LayerToggles";
@@ -37,6 +37,10 @@ function isPointInPolygon(point: [number, number], rings: GeoJSON.Position[][]):
   return inside;
 }
 
+function distanceSq(a: [number, number], b: [number, number]) {
+  return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2;
+}
+
 function MapPage() {
   const { selectedAreaId, selectedFacilityId, selectArea, selectFacility } = useMapStore();
   const [searchValue, setSearchValue] = useState("");
@@ -55,25 +59,26 @@ function MapPage() {
     });
   }, [loadAll]);
 
+  const lastFetchCenterRef = useRef<[number, number] | null>(null);
+
   // Fetch only when we pan outside the currently loaded areas; stay put otherwise to avoid marker flicker.
   useEffect(() => {
     const areaFromCenter = viewport.center as [number, number];
     const insideKnownArea = areas.some(a => a.geom && isPointInsideGeometry(areaFromCenter, a.geom as GeoJSON.Geometry));
-    if (!insideKnownArea) {
+    const sameAsLastFetch =
+      lastFetchCenterRef.current &&
+      distanceSq(lastFetchCenterRef.current, areaFromCenter) < 1e-10;
+    if (!insideKnownArea && !sameAsLastFetch && !loading) {
+      lastFetchCenterRef.current = areaFromCenter;
       loadAll({ center: areaFromCenter }).catch(() => {
         // error handled via store state
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [viewport.center, areas]);
+  }, [viewport.center, areas, loading]);
 
-  // Allow reloading when a different area is explicitly selected (e.g., via list/search), not on map drags.
-  useEffect(() => {
-    if (!selectedAreaId) return;
-    loadAll({ areaId: selectedAreaId }).catch(() => {
-      // error handled via store state
-    });
-  }, [loadAll, selectedAreaId]);
+  // Removed: area selection should not trigger full reload.
+  // Data is already loaded by the viewport-based effect above.
 
   const areaIdByPoint = useMemo(() => {
     const withGeom = areas.filter(a => a.geom);
@@ -86,11 +91,22 @@ function MapPage() {
 
   const ticketsWithArea = useMemo(
     () =>
-      tickets.map(t => ({
-        ...t,
-        areaId: t.areaId ?? areaIdByPoint(t.coords)
-      })),
-    [areaIdByPoint, tickets]
+      tickets.map(t => {
+        // First try to use ticket's own coords
+        if (t.coords) {
+          return { ...t, areaId: areaIdByPoint(t.coords) };
+        }
+        // If no coords, try to use the facility's coords
+        if (t.facilityId) {
+          const facility = facilities.find(f => f.id === t.facilityId);
+          if (facility?.coords) {
+            return { ...t, areaId: areaIdByPoint(facility.coords) };
+          }
+        }
+        // No coords available
+        return { ...t, areaId: undefined };
+      }),
+    [areaIdByPoint, tickets, facilities]
   );
 
   const areaSummaries: AreaSummary[] = useMemo(() => {
@@ -100,17 +116,52 @@ function MapPage() {
         if (!t.slaDueAt) return false;
         return new Date(t.slaDueAt).getTime() < Date.now();
       });
-      const derivedRisk = a.riskScore ?? Math.min(100, overdueTickets.length * 25 + (openTickets.length - overdueTickets.length) * 10);
+
+      // Count facilities by status in this area (pure geometry-based)
+      const areaFacilities = facilities.filter(f => {
+        if (!f.coords || !a.geom) return false;
+        return isPointInsideGeometry(f.coords, a.geom as GeoJSON.Geometry);
+      });
+      const overdueFacilities = areaFacilities.filter(f => {
+        const relatedTicket = tickets.find(t => t.facilityId === f.id);
+        if (relatedTicket) {
+          const ticketStatus = deriveTicketStatus(relatedTicket);
+          return ticketStatus === "overdue";
+        }
+        // Check if inspection is stale
+        if (!f.lastInspection) return true;
+        return isStaleInspection(f.lastInspection, 365);
+      });
+      const inProgressFacilities = areaFacilities.filter(f => {
+        const relatedTicket = tickets.find(t => t.facilityId === f.id);
+        if (relatedTicket) {
+          const ticketStatus = deriveTicketStatus(relatedTicket);
+          return ticketStatus !== "overdue"; // in_progress or within_sla
+        }
+        return false;
+      });
+
+      // Risk calculation: weight overdue items heavier
+      // Overdue: tickets * 25 + facilities * 15
+      // In progress: tickets * 10 + facilities * 5
+      const derivedRisk = Math.min(
+        100,
+        overdueTickets.length * 25 +
+        (openTickets.length - overdueTickets.length) * 10 +
+        overdueFacilities.length * 15 +
+        inProgressFacilities.length * 5
+      );
+
       return {
         id: a.id,
         name: a.name,
         riskScore: derivedRisk,
-        facilities: facilities.filter(f => f.areaId === a.id).length,
+        facilities: areaFacilities.length,
         openTickets: openTickets.length,
         overdueTickets: overdueTickets.length
       };
     });
-  }, [areas, facilities, ticketsWithArea]);
+  }, [areas, facilities, ticketsWithArea, tickets]);
 
   const selectedFacility = useMemo(() => {
     const facility = facilities.find(f => f.id === selectedFacilityId);
@@ -321,7 +372,9 @@ function MapPage() {
           ) : selectedArea ? (
             <AreaCard area={selectedArea} />
           ) : null}
-          {!loading && <NearbyIssues tickets={ticketsWithArea} areas={areas} selectedAreaId={selectedAreaId} />}
+          {!loading && selectedAreaId && !selectedFacility && (
+            <NearbyIssues tickets={ticketsWithArea} areas={areas} selectedAreaId={selectedAreaId} />
+          )}
         </div>
       )}
 
@@ -356,7 +409,7 @@ function InfoSkeleton() {
   );
 }
 
-function NearbyIssues({ tickets, areas, selectedAreaId }: { tickets: TicketRecord[]; areas: AreaRecord[]; selectedAreaId: string }) {
+function NearbyIssues({ tickets, areas, selectedAreaId }: { tickets: Array<TicketRecord & { areaId?: string }>; areas: AreaRecord[]; selectedAreaId: string }) {
   const openIssues = tickets
     .filter(t => t.status !== "completed" && t.status !== "cancelled")
     .filter(t => t.areaId === selectedAreaId)

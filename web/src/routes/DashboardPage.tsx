@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
+import type GeoJSON from "geojson";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import RiskTrendChart from "../charts/RiskTrendChart";
@@ -7,6 +8,26 @@ import TicketByTypeChart from "../charts/TicketByTypeChart";
 import FacilityGradePieChart from "../charts/FacilityGradePieChart";
 import { Input } from "../components/ui/input";
 import { useDataStore } from "../store/dataStore";
+
+function isPointInsideGeometry(point: [number, number], geom?: GeoJSON.Geometry): boolean {
+  if (!geom) return false;
+  if (geom.type === "Polygon") return isPointInPolygon(point, geom.coordinates as GeoJSON.Position[][]);
+  if (geom.type === "MultiPolygon") return (geom.coordinates as GeoJSON.Position[][][]).some(poly => isPointInPolygon(point, poly));
+  return false;
+}
+
+function isPointInPolygon(point: [number, number], rings: GeoJSON.Position[][]): boolean {
+  const [lng, lat] = point;
+  let inside = false;
+  const ring = rings[0];
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0], yi = ring[i][1];
+    const xj = ring[j][0], yj = ring[j][1];
+    const intersect = yi > lat !== yj > lat && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
 
 function DashboardPage() {
   const { areaId } = useParams();
@@ -27,17 +48,27 @@ function DashboardPage() {
   }, [loadAll, areaId]);
 
   const selectedArea = useMemo(
-    () => areas.find((a) => a.id === areaId) ?? areaOptions.find((a) => a.id === areaId) ?? areas[0] ?? areaOptions[0],
-    [areaId, areaOptions, areas]
+    () => areas.find((a) => a.id === areaId) ?? areas[0],
+    [areaId, areas]
   );
 
+  // Use areaOptions for display name if selectedArea doesn't have full data
+  const displayName = selectedArea?.name ?? areaOptions.find((a) => a.id === areaId)?.name ?? "未選擇區域";
+
   const areaFacilities = useMemo(
-    () => facilities.filter((f) => f.areaId === selectedArea?.id),
-    [facilities, selectedArea?.id]
+    () => facilities.filter((f) => {
+      if (!f.coords || !selectedArea?.geom) return false;
+      return isPointInsideGeometry(f.coords, selectedArea.geom as GeoJSON.Geometry);
+    }),
+    [facilities, selectedArea]
   );
+
   const areaTickets = useMemo(
-    () => tickets.filter((t) => t.areaId === selectedArea?.id),
-    [tickets, selectedArea?.id]
+    () => tickets.filter((t) => {
+      if (!t.coords || !selectedArea?.geom) return false;
+      return isPointInsideGeometry(t.coords, selectedArea.geom as GeoJSON.Geometry);
+    }),
+    [tickets, selectedArea]
   );
 
   const stats = useMemo(() => {
@@ -100,7 +131,7 @@ function DashboardPage() {
         <div className="space-y-2">
           <div>
             <p className="text-sm text-slate-400">區域儀表板</p>
-            <h1 className="text-2xl font-semibold text-slate-50">{selectedArea?.name ?? "未選擇區域"}</h1>
+            <h1 className="text-2xl font-semibold text-slate-50">{displayName}</h1>
           </div>
           <div className="relative w-72">
             <Input
