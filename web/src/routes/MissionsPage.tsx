@@ -42,7 +42,7 @@ function MissionsPage() {
   const [keyword, setKeyword] = useState("");
   const [reportingFacilityId, setReportingFacilityId] = useState<string | null>(null);
   const [reportForm, setReportForm] = useState<ReportForm>({ isHealthy: "", maintenanceType: "", note: "", photo: null });
-  const { areas, facilities, loadAll } = useDataStore();
+  const { areas, facilities, facilityTypes, loadAll } = useDataStore();
 
   useEffect(() => {
     loadAll().catch(() => {});
@@ -86,6 +86,25 @@ function MissionsPage() {
   }, [area, keyword, type, upcomingInspections]);
 
   const areaOptions = useMemo(() => [{ id: "all", name: "全部區域" }, ...areas], [areas]);
+  const typeOptions = useMemo(
+    () =>
+      facilityTypes.length
+        ? [{ id: "all", label: "全部類型" }, ...facilityTypes.map((t) => ({ id: t.type, label: t.labelZh ?? t.type }))] :
+        [
+          { id: "all", label: "全部類型" },
+          { id: "building", label: "建築物" },
+          { id: "street_light", label: "路燈" },
+          { id: "park", label: "公園" },
+          { id: "public_toilet", label: "公共廁所" },
+          { id: "bridge", label: "橋樑" },
+          { id: "road", label: "道路" },
+          { id: "bike_station", label: "腳踏車站點" },
+          { id: "cctv", label: "監視器" },
+          { id: "hazardous_factory", label: "危險工廠" },
+          { id: "police_station", label: "警察局" }
+        ],
+    [facilityTypes]
+  );
 
   const handleOpenReport = (facilityId: string) => {
     setReportingFacilityId(facilityId);
@@ -121,13 +140,9 @@ function MissionsPage() {
             ))}
           </Select>
           <Select value={type} onChange={(e) => setType(e.target.value)}>
-            <option value="all">全部類型</option>
-            <option value="park">公園</option>
-            <option value="street_light">路燈</option>
-            <option value="road_hazard">道路坑洞</option>
-            <option value="sidewalk">人行道</option>
-            <option value="playground">遊戲場</option>
-            <option value="other">其他</option>
+            {typeOptions.map((opt) => (
+              <option key={opt.id} value={opt.id}>{opt.label}</option>
+            ))}
           </Select>
           <Input placeholder="搜尋設施或區域" value={keyword} onChange={(e) => setKeyword(e.target.value)} />
         </div>
@@ -146,7 +161,7 @@ function MissionsPage() {
                   {mission.area} · {mission.typeLabel}
                 </p>
               </div>
-              <Badge variant={mission.dueInDays <= 5 ? "warning" : "secondary"}>{mission.dueInDays} 天內檢查</Badge>
+              <Badge variant={mission.dueInDays <= 5 ? "warning" : "default"}>{mission.dueInDays} 天內檢查</Badge>
             </CardHeader>
             <CardContent className="space-y-2 text-sm text-slate-200">
               <p className="text-xs text-slate-400">上次檢查：{mission.lastInspection}</p>

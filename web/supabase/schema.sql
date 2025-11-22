@@ -26,6 +26,9 @@ create table if not exists public.areas (
   centroid geometry(Point,4326) generated always as (st_centroid(geom)) stored,
 
   population_total int,
+  -- 人口結構
+  gender_ratio int check (gender_ratio between 0 and 100),
+  weighted_avg_age int check (weighted_avg_age >= 0),
   created_at timestamptz default now()
 );
 
@@ -48,7 +51,7 @@ $$;
 -- FACILITIES
 create table if not exists public.facilities (
   id uuid primary key default gen_random_uuid(),
-  type text not null check (type in ('park','playground','street_light','tree','toilet','other','road_hazard','police_station','sidewalk','drinking_fountain','elder_center','school_zone')),
+  type text not null check (type in ('building','street_light','park','public_toilet','bridge','road','bike_station','cctv','hazardous_factory','police_station')),
   name text not null,
   geom geometry(Point,4326) not null,
   health_grade text check (health_grade in ('A','B','C')),
@@ -77,19 +80,16 @@ create table if not exists public.facility_type_meta (
   created_at timestamptz default now()
 );
 insert into public.facility_type_meta (type, label_zh, emoji, icon_name) values
-  ('park','公園','🌳','TreePine'),
-  ('playground','遊戲場','🛝','Play'),
-  ('street_light','路燈','💡','LampWallDown'),
-  ('streetlight','路燈','💡','LampWallDown'),
-  ('police_station','警察局','🚓','Shield'),
-  ('sidewalk','人行道','🚶','Route'),
-  ('road_hazard','道路坑洞','⚠️','AlertTriangle'),
-  ('drinking_fountain','飲水機','🚰','CupSoda'),
-  ('elder_center','樂齡中心','🧓','HeartHandshake'),
-  ('school_zone','校園周邊','🏫','School'),
-  ('tree','樹木','🌲','TreePine'),
-  ('toilet','公廁','🚻','Toilet'),
-  ('other','其他','📍','MapPin')
+  ('building','建築物',null,'Building'),
+  ('street_light','路燈',null,'Lamp'),
+  ('park','公園','🌳','TreePalm'),
+  ('public_toilet','公共廁所','🚻','Toilet'),
+  ('bridge','橋樑','🌉','Bridge'),
+  ('road','道路','🛣️','Road'),
+  ('bike_station','腳踏車站點','🚲','Bike'),
+  ('cctv','監視器','🎥','Camera'),
+  ('hazardous_factory','危險工廠','🏭','Factory'),
+  ('police_station','警察局','🚓','ShieldCheck')
 on conflict (type) do update set
   label_zh = excluded.label_zh,
   emoji = excluded.emoji,
@@ -163,6 +163,28 @@ create table if not exists public.area_risk_snapshots (
 );
 create index if not exists area_risk_snapshots_idx on public.area_risk_snapshots (area_id, computed_at desc);
 
+-- BUILDING AGE POINTS
+create table if not exists public.building_ages (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  geom geometry(Point,4326) not null,
+  age_years int not null check (age_years >= 0),
+  created_at timestamptz default now()
+);
+create index if not exists building_ages_geom_idx on public.building_ages using gist (geom);
+
+-- NOISE MEASUREMENTS
+create table if not exists public.noise_measurements (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  geom geometry(Point,4326) not null,
+  noise_morning numeric(6,2) not null,
+  noise_afternoon numeric(6,2) not null,
+  noise_night numeric(6,2) not null,
+  created_at timestamptz default now()
+);
+create index if not exists noise_measurements_geom_idx on public.noise_measurements using gist (geom);
+
 insert into public.facilities (id, type, name, geom, health_grade, last_inspection_at)
 values
   ('10000000-0000-0000-0000-000000000001','park','黎明公園', st_setsrid(st_makepoint(120.646,24.16),4326),'B','2024-10-05'),
@@ -170,10 +192,10 @@ values
   ('10000000-0000-0000-0000-000000000003','park','文心森林公園', st_setsrid(st_makepoint(120.64,24.158),4326),'C','2024-08-20'),
   ('10000000-0000-0000-0000-000000000004','street_light','福星北路路燈 #21', st_setsrid(st_makepoint(120.649,24.177),4326),'B','2024-11-05'),
   ('10000000-0000-0000-0000-000000000005','police_station','西屯分局', st_setsrid(st_makepoint(120.648,24.164),4326),'A','2024-11-01'),
-  ('10000000-0000-0000-0000-000000000006','sidewalk','逢甲商圈人行道', st_setsrid(st_makepoint(120.6455,24.174),4326),'B','2024-09-02'),
+  ('10000000-0000-0000-0000-000000000006','road','逢甲商圈人行道', st_setsrid(st_makepoint(120.6455,24.174),4326),'B','2024-09-02'),
   ('10000000-0000-0000-0000-000000000007','park','崇德公園', st_setsrid(st_makepoint(120.69,24.163),4326),'B','2024-10-15'),
-  ('10000000-0000-0000-0000-000000000008','elder_center','南屯區樂齡中心', st_setsrid(st_makepoint(120.637,24.135),4326),'A','2024-10-30'),
-  ('10000000-0000-0000-0000-000000000009','drinking_fountain','草悟道飲水機', st_setsrid(st_makepoint(120.6605,24.159),4326),'B','2024-10-28')
+  ('10000000-0000-0000-0000-000000000008','building','南屯區樂齡中心', st_setsrid(st_makepoint(120.637,24.135),4326),'A','2024-10-30'),
+  ('10000000-0000-0000-0000-000000000009','building','草悟道飲水機', st_setsrid(st_makepoint(120.6605,24.159),4326),'B','2024-10-28')
 on conflict do nothing;
 
 insert into public.tickets (id, facility_id, geom, source, type, severity, status, created_at, sla_days, sla_due_at, estimated_cost, risk_impact, description)

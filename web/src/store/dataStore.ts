@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type GeoJSON from "geojson";
-import { fetchAreaByPoint, fetchAreaRiskSnapshots, fetchAreas, fetchFacilities, fetchFacilityInspections, fetchFacilityTypes, fetchTicketEvents, fetchTickets } from "../lib/api";
+import { fetchAreaByPoint, fetchAreaRiskSnapshots, fetchAreas, fetchFacilities, fetchFacilityInspections, fetchFacilityTypes, fetchTicketEvents, fetchTickets, fetchBuildingAges, fetchNoiseMeasurements } from "../lib/api";
 
 export type AreaRecord = {
   id: string;
@@ -10,6 +10,8 @@ export type AreaRecord = {
   geom?: GeoJSON.Geometry;
   populationTotal?: number | null;
   riskScore?: number;
+  genderRatio?: number | null;
+  weightedAvgAge?: number | null;
 };
 
 type AreaOption = Pick<AreaRecord, "id" | "name" | "code" | "county">;
@@ -56,6 +58,8 @@ type DataState = {
   ticketEvents: TicketEventRecord[];
   areaRiskSnapshots: Array<{ areaId: string; riskScore: number; computedAt: string; _computedAtRaw: string }>;
   facilityTypes: Array<{ type: string; labelZh: string; emoji?: string | null; iconName?: string | null }>;
+  buildingAges: Array<{ id: string; name: string; coords: [number, number]; ageYears: number }>;
+  noiseMeasurements: Array<{ id: string; name: string; coords: [number, number]; morning: number; afternoon: number; night: number }>;
   currentAreaId?: string;
   currentCounty?: string;
   loading: boolean;
@@ -71,6 +75,8 @@ export const useDataStore = create<DataState>((set, get) => ({
   ticketEvents: [],
   areaRiskSnapshots: [],
   facilityTypes: [],
+  buildingAges: [],
+  noiseMeasurements: [],
   currentAreaId: undefined,
   currentCounty: undefined,
   loading: false,
@@ -133,6 +139,8 @@ export const useDataStore = create<DataState>((set, get) => ({
         county: a.county,
         geom: a.geom as GeoJSON.Geometry,
         populationTotal: a.populationTotal,
+        genderRatio: (a as any).genderRatio ?? null,
+        weightedAvgAge: (a as any).weightedAvgAge ?? null,
         riskScore: undefined,
       })) ?? [];
       if (areas.some((a) => !a.county)) throw new Error("區域資料缺少 county 欄位或值，請確認資料庫縣市欄位已填寫");
@@ -144,6 +152,8 @@ export const useDataStore = create<DataState>((set, get) => ({
           facilities: prev.facilities,
           tickets: prev.tickets,
           facilityTypes: prev.facilityTypes,
+          buildingAges: prev.buildingAges,
+          noiseMeasurements: prev.noiseMeasurements,
           currentAreaId: prev.currentAreaId,
           currentCounty: prev.currentCounty,
           ticketEvents: prev.ticketEvents,
@@ -177,8 +187,15 @@ export const useDataStore = create<DataState>((set, get) => ({
       if (facilitiesRes.error) throw new Error(facilitiesRes.error);
       if (ticketsRes.error) throw new Error(ticketsRes.error);
 
-      const [riskRes, facilityTypesRes] = await Promise.all([fetchAreaRiskSnapshots(), fetchFacilityTypes()]);
+      const [riskRes, facilityTypesRes, buildingAgesRes, noiseRes] = await Promise.all([
+        fetchAreaRiskSnapshots(),
+        fetchFacilityTypes(),
+        fetchBuildingAges(),
+        fetchNoiseMeasurements()
+      ]);
       if (facilityTypesRes.error) throw new Error(facilityTypesRes.error);
+      if (buildingAgesRes.error) throw new Error(buildingAgesRes.error);
+      if (noiseRes.error) throw new Error(noiseRes.error);
 
       const facilityIds = facilitiesRes.data?.map((f) => f.id) ?? [];
       const ticketIds = ticketsRes.data?.map((t) => t.id) ?? [];
@@ -241,6 +258,26 @@ export const useDataStore = create<DataState>((set, get) => ({
         photoUrls: t.photoUrls,
       })) ?? [];
 
+      const buildingAges = (buildingAgesRes.data ?? [])
+        .map((b) => ({
+          id: b.id,
+          name: b.name,
+          coords: (b.geom as GeoJSON.Point | undefined)?.coordinates as [number, number] | undefined,
+          ageYears: b.ageYears
+        }))
+        .filter((b): b is { id: string; name: string; coords: [number, number]; ageYears: number } => !!b.coords);
+
+      const noiseMeasurements = (noiseRes.data ?? [])
+        .map((n) => ({
+          id: n.id,
+          name: n.name,
+          coords: (n.geom as GeoJSON.Point | undefined)?.coordinates as [number, number] | undefined,
+          morning: n.morning,
+          afternoon: n.afternoon,
+          night: n.night
+        }))
+        .filter((n): n is { id: string; name: string; coords: [number, number]; morning: number; afternoon: number; night: number } => !!n.coords);
+
       const areasWithRisk = areas.map((a) => ({
         ...a,
         riskScore: latestRiskByArea.get(a.id)?.score,
@@ -264,6 +301,8 @@ export const useDataStore = create<DataState>((set, get) => ({
         facilities,
         tickets,
         facilityTypes: facilityTypesRes.data ?? [],
+        buildingAges,
+        noiseMeasurements,
         currentAreaId: targetAreaId,
         currentCounty: targetArea?.county ?? countyFilter,
         ticketEvents: ticketEventsRes.data ?? [],

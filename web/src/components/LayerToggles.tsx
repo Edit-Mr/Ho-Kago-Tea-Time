@@ -1,4 +1,4 @@
-import { useMapStore, type MapStore, type Scenario } from "../store/mapStore";
+import { useMapStore, type MapStore, type Scenario, type BackgroundMode, type NoiseTime } from "../store/mapStore";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 
@@ -9,42 +9,56 @@ type LayerTogglesProps = {
 
 const scenarioPresets: Array<{ id: Scenario; title: string; description: string; highlights: string[] }> = [
   {
-    id: "home_safety",
-    title: "我家附近安全嗎？",
-    description: "顯示路燈、坑洞、事故點與近期通報，適合居民查看周遭。",
-    highlights: ["路燈故障", "坑洞", "近期通報點"],
-  },
-  {
-    id: "official_priority",
-    title: "官員優先處理區域",
-    description: "風險模型：老化 × 人口 × 通報量，搭配逾期工單聚落。",
-    highlights: ["風險熱區", "逾期工單", "事故史"],
-  },
-  {
     id: "aging_infra",
-    title: "老舊設施 / 逾期維護",
-    description: "找出久未檢查、維修逾期的設施，搭配人口弱勢區。",
-    highlights: ["維修逾期", "弱勢人口", "檢查間隔"],
+    title: "老舊設施 / 預期維護",
+    description: "所有設施顯示，顏色代表健康等級；背景維持風險分數。",
+    highlights: ["健康等級", "逾期維護", "風險背景"],
   },
   {
-    id: "incident_hotspots",
-    title: "事故熱點",
-    description: "近期事故 + 通報熱點，協助安排快閃修補或封鎖。",
-    highlights: ["事故點", "通報潮", "臨時措施"],
+    id: "gender_ratio",
+    title: "社區男女比",
+    description: "背景以紅到藍呈現男女比，圖示隱藏。",
+    highlights: ["紅藍背景", "人口結構"],
+  },
+  {
+    id: "avg_age",
+    title: "社區平均年齡",
+    description: "背景紅藍漸層呈現平均年齡，圖示隱藏。",
+    highlights: ["平均年齡", "紅藍背景"],
+  },
+  {
+    id: "building_age",
+    title: "屋齡",
+    description: "只顯示大樓/屋齡點，紅黃綠代表年齡；背景為區域平均屋齡。",
+    highlights: ["屋齡圖示", "紅黃綠背景"],
+  },
+  {
+    id: "safety",
+    title: "安全性",
+    description: "只顯示監視器、警察局；背景依密度紅黃綠。",
+    highlights: ["監視器", "警局", "安全密度"],
+  },
+  {
+    id: "noise",
+    title: "噪音",
+    description: "顯示噪音測點，切換上午/下午/晚上；背景取平均噪音。",
+    highlights: ["噪音測點", "時間切換", "背景平均"],
   },
   {
     id: "custom",
-    title: "自訂圖層",
-    description: "自由開關圖層，適合展示或研究。",
+    title: "自由模式",
+    description: "自訂圖層與背景，選你要看的資訊。",
     highlights: ["自訂視圖"],
   },
 ];
 
 const layerLabels: Record<LayerKey, string> = {
   areas: "區域風險多邊形",
-  facilities: "設施圖示 (公園/路燈)",
+  facilities: "設施圖示",
   tickets: "工單票證",
   heatmap: "風險熱區",
+  buildingAges: "屋齡圖示",
+  noisePoints: "噪音圖示",
 };
 
 function LayerToggles({ facilityTypes }: LayerTogglesProps) {
@@ -57,6 +71,10 @@ function LayerToggles({ facilityTypes }: LayerTogglesProps) {
   const resetFacilityTypeFilter = useMapStore((s) => s.resetFacilityTypeFilter);
   const facilityStatusFilter = useMapStore((s) => s.facilityStatusFilter);
   const toggleFacilityStatus = useMapStore((s) => s.toggleFacilityStatus);
+  const backgroundMode = useMapStore((s) => s.backgroundMode);
+  const setBackgroundMode = useMapStore((s) => s.setBackgroundMode);
+  const noiseTime = useMapStore((s) => s.noiseTime);
+  const setNoiseTime = useMapStore((s) => s.setNoiseTime);
 
   return (
     <Card>
@@ -97,6 +115,55 @@ function LayerToggles({ facilityTypes }: LayerTogglesProps) {
               );
             })}
           </div>
+        </div>
+        <div className="space-y-2">
+          <p className="text-xs text-slate-400">背景呈現</p>
+          <div className="grid grid-cols-2 gap-2">
+            {[
+              { id: "risk", label: "風險分數" },
+              { id: "gender_ratio", label: "男女比" },
+              { id: "avg_age", label: "平均年齡" },
+              { id: "building_age", label: "屋齡" },
+              { id: "safety", label: "安全密度" },
+              { id: "noise", label: "噪音平均" },
+            ].map((item) => {
+              const active = backgroundMode === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => {
+                    setBackgroundMode(item.id as BackgroundMode);
+                    setScenario("custom");
+                  }}
+                  className={`w-full rounded-lg border px-2 py-1.5 text-xs transition ${
+                    active ? "border-brand-400/80 bg-brand-500/10 text-slate-50" : "border-slate-800 bg-slate-900/60 text-slate-200"
+                  }`}
+                >
+                  {item.label}
+                </button>
+              );
+            })}
+          </div>
+          {backgroundMode === "noise" && (
+            <div className="flex flex-wrap gap-1 pt-1">
+              {(["morning", "afternoon", "night"] as NoiseTime[]).map((slot) => {
+                const active = noiseTime === slot;
+                return (
+                  <button
+                    key={slot}
+                    type="button"
+                    onClick={() => setNoiseTime(slot)}
+                    className={`px-2 py-1 rounded-full text-[11px] border transition ${
+                      active ? "bg-amber-500/20 border-amber-400/40 text-amber-50" : "bg-slate-800 border-slate-700 text-slate-200"
+                    }`}
+                  >
+                    {slot === "morning" ? "上午" : slot === "afternoon" ? "下午" : "晚上"}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
         {Object.entries(activeLayers).map(([key, value]) => (
           <div key={key} className="flex items-center justify-between">

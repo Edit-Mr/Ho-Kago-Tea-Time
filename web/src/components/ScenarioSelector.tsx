@@ -4,9 +4,9 @@ import { Button } from "./ui/button";
 
 const scenarios = [
   {
-    key: "official_priority",
-    title: "官員找優先處理區域",
-    desc: "風險熱度圖、逾期工單集中度、低預算高事故區",
+    key: "aging_infra",
+    title: "老舊設施 / 預期維護",
+    desc: "所有設施與風險背景，適合排程巡檢",
   },
   { key: "custom", title: "自訂圖層", desc: "自由開關各維度圖層" },
 ] as const;

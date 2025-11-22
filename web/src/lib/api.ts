@@ -51,15 +51,17 @@ type ApiResult<T> = { data?: T; error?: string };
 type AreaSelect = "full" | "lite";
 type AreaLevel = "village" | "district" | "county";
 
-export async function fetchAreas(params?: { county?: string; areaId?: string; select?: AreaSelect; level?: AreaLevel }): Promise<ApiResult<Array<{ id: string; name: string; code?: string | null; county: string; populationTotal?: number | null; geom?: GeoJSON.Geometry }>>> {
+export async function fetchAreas(params?: { county?: string; areaId?: string; select?: AreaSelect; level?: AreaLevel }): Promise<ApiResult<Array<{ id: string; name: string; code?: string | null; county: string; populationTotal?: number | null; genderRatio?: number | null; weightedAvgAge?: number | null; geom?: GeoJSON.Geometry }>>> {
   if (!supabase) return { error: "Supabase 環境變數未設定" };
   const selectMode: AreaSelect = params?.select ?? "full";
-  const selectColumns = selectMode === "full" ? "id,name,code,county,population_total,geom" : "id,name,code,county";
+  const selectColumns = selectMode === "full"
+    ? "id,name,code,county,population_total,gender_ratio,weighted_avg_age,geom"
+    : "id,name,code,county,gender_ratio,weighted_avg_age";
   let query = supabase.from("areas").select(selectColumns);
   if (params?.county) query = query.eq("county", params.county);
   if (params?.level) query = query.eq("level", params.level);
   if (params?.areaId) query = query.eq("id", params.areaId);
-  const { data, error } = await query;
+  const { data, error } = await (query as any);
   if (error) {
     const msg = error.message?.toLowerCase() ?? "";
     if (msg.includes("column") && msg.includes("county")) {
@@ -68,7 +70,7 @@ export async function fetchAreas(params?: { county?: string; areaId?: string; se
     return { error: error.message };
   }
   try {
-    const mapped = data?.map((row) => {
+    const mapped = (data as any[])?.map((row: any) => {
       const county = (row as Record<string, unknown>).county;
       if (county === undefined || county === null || county === "") {
         throw new Error("areas 資料缺少 county 值，請確認縣市欄位已填寫");
@@ -79,6 +81,8 @@ export async function fetchAreas(params?: { county?: string; areaId?: string; se
         code: row.code,
         county: county as string,
         populationTotal: row.population_total,
+        genderRatio: (row as any).gender_ratio as number | undefined,
+        weightedAvgAge: (row as any).weighted_avg_age as number | undefined,
         geom: (row as any).geom as GeoJSON.Geometry | undefined,
       };
     });
@@ -250,6 +254,38 @@ export async function fetchTicketEvents(ticketIds?: string[]): Promise<ApiResult
       eventType: row.event_type,
       createdAt: row.created_at,
       data: row.data,
+    })),
+  };
+}
+
+export async function fetchBuildingAges(): Promise<ApiResult<Array<{ id: string; name: string; geom: GeoJSON.Geometry; ageYears: number }>>> {
+  if (!supabase) return { error: "Supabase 環境變數未設定" };
+  const { data, error } = await supabase.from("building_ages").select("id,name,geom,age_years");
+  if (error) return { error: error.message };
+  return {
+    data: data?.map((row) => ({
+      id: row.id,
+      name: row.name,
+      geom: row.geom as GeoJSON.Geometry,
+      ageYears: row.age_years,
+    })),
+  };
+}
+
+export async function fetchNoiseMeasurements(): Promise<ApiResult<Array<{ id: string; name: string; geom: GeoJSON.Geometry; morning: number; afternoon: number; night: number }>>> {
+  if (!supabase) return { error: "Supabase 環境變數未設定" };
+  const { data, error } = await supabase
+    .from("noise_measurements")
+    .select("id,name,geom,noise_morning,noise_afternoon,noise_night");
+  if (error) return { error: error.message };
+  return {
+    data: data?.map((row) => ({
+      id: row.id,
+      name: row.name,
+      geom: row.geom as GeoJSON.Geometry,
+      morning: Number(row.noise_morning),
+      afternoon: Number(row.noise_afternoon),
+      night: Number(row.noise_night),
     })),
   };
 }

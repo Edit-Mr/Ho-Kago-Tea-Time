@@ -17,6 +17,19 @@ import { useDataStore, type AreaRecord, type TicketRecord } from "../store/dataS
 import { deriveTicketStatus } from "../utils/tickets";
 import { type FacilityStatusFilter } from "../store/mapStore";
 
+type AreaFeatureProps = {
+  id: string;
+  name: string;
+  risk: number;
+  gender_ratio?: number;
+  avg_age?: number;
+  building_age?: number;
+  safety_score?: number;
+  noise_morning?: number;
+  noise_afternoon?: number;
+  noise_night?: number;
+};
+
 function isPointInsideGeometry(point: [number, number], geom?: GeoJSON.Geometry): boolean {
   if (!geom) return false;
   if (geom.type === "Polygon") return isPointInPolygon(point, geom.coordinates as GeoJSON.Position[][]);
@@ -50,7 +63,11 @@ function MapPage() {
   const setRightPanelOpen = useUiStore(s => s.setRightPanelOpen);
   const { areas, areaOptions, facilities, tickets, ticketEvents, loading, error, loadAll } = useDataStore();
   const facilityTypesMeta = useDataStore(s => s.facilityTypes);
+  const buildingAges = useDataStore(s => s.buildingAges);
+  const noiseMeasurements = useDataStore(s => s.noiseMeasurements);
   const viewport = useMapStore(s => s.viewport);
+  const backgroundMode = useMapStore(s => s.backgroundMode);
+  const noiseTime = useMapStore(s => s.noiseTime);
 
   // Preload names list for search suggestions
   useEffect(() => {
@@ -108,6 +125,79 @@ function MapPage() {
       }),
     [areaIdByPoint, tickets, facilities]
   );
+
+  const buildingAgesWithArea = useMemo(
+    () =>
+      buildingAges.map(b => ({
+        ...b,
+        areaId: areaIdByPoint(b.coords)
+      })),
+    [areaIdByPoint, buildingAges]
+  );
+
+  const avgBuildingAgeByArea = useMemo(() => {
+    const map = new Map<string, { sum: number; count: number }>();
+    buildingAgesWithArea.forEach(b => {
+      if (!b.areaId) return;
+      const entry = map.get(b.areaId) ?? { sum: 0, count: 0 };
+      map.set(b.areaId, { sum: entry.sum + b.ageYears, count: entry.count + 1 });
+    });
+    const avgMap = new Map<string, number>();
+    map.forEach((entry, id) => {
+      avgMap.set(id, entry.sum / Math.max(1, entry.count));
+    });
+    return avgMap;
+  }, [buildingAgesWithArea]);
+
+  const noiseWithArea = useMemo(
+    () =>
+      noiseMeasurements.map(n => ({
+        ...n,
+        areaId: areaIdByPoint(n.coords)
+      })),
+    [areaIdByPoint, noiseMeasurements]
+  );
+
+  const noiseAverageByArea = useMemo(() => {
+    const map = new Map<string, { morning: number; afternoon: number; night: number; count: number }>();
+    noiseWithArea.forEach(n => {
+      if (!n.areaId) return;
+      const existing = map.get(n.areaId) ?? { morning: 0, afternoon: 0, night: 0, count: 0 };
+      map.set(n.areaId, {
+        morning: existing.morning + n.morning,
+        afternoon: existing.afternoon + n.afternoon,
+        night: existing.night + n.night,
+        count: existing.count + 1
+      });
+    });
+    const avg = new Map<string, { morning: number; afternoon: number; night: number }>();
+    map.forEach((val, id) => {
+      const denom = Math.max(1, val.count);
+      avg.set(id, {
+        morning: val.morning / denom,
+        afternoon: val.afternoon / denom,
+        night: val.night / denom
+      });
+    });
+    return avg;
+  }, [noiseWithArea]);
+
+  const safetyScoreByArea = useMemo(() => {
+    const map = new Map<string, number>();
+    areas.forEach(area => {
+      let count = 0;
+      facilities.forEach(f => {
+        if (!f.coords || !area.geom) return;
+        if ((f.type === "cctv" || f.type === "police_station") && isPointInsideGeometry(f.coords, area.geom as GeoJSON.Geometry)) {
+          count += 1;
+        }
+      });
+      const pop = area.populationTotal ?? 0;
+      const densityScore = pop > 0 ? (count / pop) * 80000 : count * 20;
+      map.set(area.id, Math.min(100, densityScore));
+    });
+    return map;
+  }, [areas, facilities]);
 
   const areaSummaries: AreaSummary[] = useMemo(() => {
     return areas.map(a => {
@@ -198,17 +288,28 @@ function MapPage() {
     return map;
   }, [areaSummaries]);
 
-  const geojsonAreas = useMemo<GeoJSON.FeatureCollection<GeoJSON.Polygon | GeoJSON.MultiPolygon, { id: string; name: string; risk: number }>>(
+  const geojsonAreas = useMemo<GeoJSON.FeatureCollection<GeoJSON.Polygon | GeoJSON.MultiPolygon, AreaFeatureProps>>(
     () => ({
       type: "FeatureCollection",
       features: areas.map(a => ({
         type: "Feature",
         id: a.id,
-        properties: { id: a.id, name: a.name, risk: riskByArea.get(a.id) ?? 0 },
+        properties: {
+          id: a.id,
+          name: a.name,
+          risk: riskByArea.get(a.id) ?? 0,
+          gender_ratio: a.genderRatio ?? undefined,
+          avg_age: a.weightedAvgAge ?? undefined,
+          building_age: avgBuildingAgeByArea.get(a.id) ?? undefined,
+          safety_score: safetyScoreByArea.get(a.id) ?? undefined,
+          noise_morning: noiseAverageByArea.get(a.id)?.morning ?? undefined,
+          noise_afternoon: noiseAverageByArea.get(a.id)?.afternoon ?? undefined,
+          noise_night: noiseAverageByArea.get(a.id)?.night ?? undefined
+        },
         geometry: a.geom as GeoJSON.Polygon | GeoJSON.MultiPolygon
       }))
     }),
-    [areas, riskByArea]
+    [areas, riskByArea, avgBuildingAgeByArea, safetyScoreByArea, noiseAverageByArea]
   );
 
   const uniqueFacilityTypes = useMemo(() => {
@@ -268,6 +369,34 @@ function MapPage() {
     [tickets]
   );
 
+  const buildingAgePoints = useMemo(
+    () =>
+      buildingAgesWithArea
+        .filter(b => b.coords)
+        .map(b => ({
+          id: b.id,
+          name: b.name,
+          ageYears: b.ageYears,
+          coordinates: b.coords as [number, number]
+        })),
+    [buildingAgesWithArea]
+  );
+
+  const noisePoints = useMemo(
+    () =>
+      noiseWithArea
+        .filter(n => n.coords)
+        .map(n => ({
+          id: n.id,
+          name: n.name,
+          morning: n.morning,
+          afternoon: n.afternoon,
+          night: n.night,
+          coordinates: n.coords as [number, number]
+        })),
+    [noiseWithArea]
+  );
+
   const searchHits = useMemo(() => {
     const source = areaOptions.length ? areaOptions : areas;
     if (!source.length) return [];
@@ -294,6 +423,10 @@ function MapPage() {
           areasGeoJson={geojsonAreas}
           facilities={mapFacilities}
           tickets={mapTickets}
+          buildingAges={buildingAgePoints}
+          noisePoints={noisePoints}
+          backgroundMode={backgroundMode}
+          noiseTime={noiseTime}
           onAreaClick={id => {
             selectArea(id);
             selectFacility(undefined);
@@ -310,17 +443,17 @@ function MapPage() {
         />
       </div>
 
-      <div className="absolute top-4 left-4 space-y-3 w-80 z-10 max-h-[calc(100vh-120px)] overflow-y-auto pr-1">
-        {error && (
-          <Card className="border-red-500/40 bg-red-500/10">
-            <CardHeader className="flex items-center justify-between">
-              <CardTitle className="text-red-100">資料載入失敗</CardTitle>
-              <Button variant="secondary" onClick={loadAll}>
-                <RefreshCcw className="h-4 w-4" aria-hidden />
-              </Button>
-            </CardHeader>
-            <CardContent className="text-sm text-red-100">{error}</CardContent>
-          </Card>
+          <div className="absolute top-4 left-4 space-y-3 w-80 z-10 max-h-[calc(100vh-120px)] overflow-y-auto pr-1">
+            {error && (
+              <Card className="border-red-500/40 bg-red-500/10">
+                <CardHeader className="flex items-center justify-between">
+                  <CardTitle className="text-red-100">資料載入失敗</CardTitle>
+                  <Button variant="secondary" onClick={() => loadAll()}>
+                    <RefreshCcw className="h-4 w-4" aria-hidden />
+                  </Button>
+                </CardHeader>
+                <CardContent className="text-sm text-red-100">{error}</CardContent>
+              </Card>
         )}
         <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-3 shadow-lg backdrop-blur space-y-2">
           <div className="flex gap-2">
@@ -452,7 +585,7 @@ export default MapPage;
 
 type MaintenanceStatus = keyof FacilityStatusFilter;
 
-function deriveFacilityStatus(facility: FacilityCardType & { slaDue?: string | undefined }, relatedTicket: TicketRecord | undefined): MaintenanceStatus {
+function deriveFacilityStatus(facility: { lastInspection?: string | undefined; slaDue?: string | undefined }, relatedTicket: TicketRecord | undefined): MaintenanceStatus {
   if (relatedTicket) {
     const derived = deriveTicketStatus(relatedTicket);
     if (derived === "overdue") return "overdue";

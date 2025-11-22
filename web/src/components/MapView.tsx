@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import mapboxgl, { type Map } from "mapbox-gl";
 import type GeoJSON from "geojson";
 import { configureMapbox } from "../lib/mapbox";
-import { useMapStore } from "../store/mapStore";
+import { useMapStore, type BackgroundMode, type NoiseTime } from "../store/mapStore";
 import { icons as lucideIcons, type LucideProps } from "lucide-react";
 
 type Facility = {
@@ -25,10 +25,43 @@ type Ticket = {
   coordinates: [number, number];
 };
 
+type BuildingAgePoint = {
+  id: string;
+  name: string;
+  ageYears: number;
+  coordinates: [number, number];
+};
+
+type NoisePoint = {
+  id: string;
+  name: string;
+  morning: number;
+  afternoon: number;
+  night: number;
+  coordinates: [number, number];
+};
+
+type AreaProps = {
+  id: string;
+  name: string;
+  risk: number;
+  gender_ratio?: number;
+  avg_age?: number;
+  building_age?: number;
+  safety_score?: number;
+  noise_morning?: number;
+  noise_afternoon?: number;
+  noise_night?: number;
+};
+
 type MapViewProps = {
-  areasGeoJson: GeoJSON.FeatureCollection<GeoJSON.Polygon | GeoJSON.MultiPolygon, { id: string; name: string; risk: number }>;
+  areasGeoJson: GeoJSON.FeatureCollection<GeoJSON.Polygon | GeoJSON.MultiPolygon, AreaProps>;
   facilities: Facility[];
   tickets: Ticket[];
+  buildingAges: BuildingAgePoint[];
+  noisePoints: NoisePoint[];
+  backgroundMode: BackgroundMode;
+  noiseTime: NoiseTime;
   onAreaClick?: (id: string) => void;
   onFacilityClick?: (id: string) => void;
   onTicketClick?: (id: string) => void;
@@ -37,6 +70,8 @@ type MapViewProps = {
 const areaSourceId = "areas-source";
 const facilitySourceId = "facilities-source";
 const ticketSourceId = "tickets-source";
+const buildingAgeSourceId = "building-age-source";
+const noiseSourceId = "noise-source";
 const gradeColors: Record<Facility["grade"], string> = {
   A: "#22c55e",
   B: "#f59e0b",
@@ -49,7 +84,7 @@ const statusColors: Record<Facility["maintenanceStatus"], string> = {
 };
 const loadingImages = new Set<string>();
 
-function MapView({ areasGeoJson, facilities, tickets, onAreaClick, onFacilityClick, onTicketClick }: MapViewProps) {
+function MapView({ areasGeoJson, facilities, tickets, buildingAges, noisePoints, backgroundMode, noiseTime, onAreaClick, onFacilityClick, onTicketClick }: MapViewProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<Map | null>(null);
   const clickAreaRef = useRef<typeof onAreaClick>();
@@ -102,10 +137,7 @@ function MapView({ areasGeoJson, facilities, tickets, onAreaClick, onFacilityCli
         id: "areas-fill",
         type: "fill",
         source: areaSourceId,
-        paint: {
-          "fill-color": ["interpolate", ["linear"], ["get", "risk"], 0, "#10b981", 40, "#f59e0b", 70, "#ef4444"],
-          "fill-opacity": 0.35
-        }
+        paint: areaFillPaint(backgroundMode, noiseTime)
       });
       map.addLayer({
         id: "areas-outline",
@@ -158,9 +190,43 @@ function MapView({ areasGeoJson, facilities, tickets, onAreaClick, onFacilityCli
         }
       });
 
+      map.addSource(buildingAgeSourceId, {
+        type: "geojson",
+        data: buildingAgeToFeatureCollection(buildingAges),
+        promoteId: "id"
+      });
+      map.addLayer({
+        id: "building-ages",
+        type: "circle",
+        source: buildingAgeSourceId,
+        paint: {
+          "circle-radius": 7,
+          "circle-color": ["step", ["get", "age"], "#22c55e", 20, "#fbbf24", 40, "#f97316", 60, "#ef4444"],
+          "circle-stroke-color": "#0f172a",
+          "circle-stroke-width": 1
+        }
+      });
+
+      map.addSource(noiseSourceId, {
+        type: "geojson",
+        data: noiseToFeatureCollection(noisePoints),
+        promoteId: "id"
+      });
+      map.addLayer({
+        id: "noise-points",
+        type: "circle",
+        source: noiseSourceId,
+        paint: {
+          "circle-radius": 8,
+          "circle-color": noiseCirclePaint(noiseTime),
+          "circle-stroke-color": "#0f172a",
+          "circle-stroke-width": 1
+        }
+      });
+
       map.on("click", e => {
         const features = map.queryRenderedFeatures(e.point, {
-          layers: ["facility-icon", "tickets", "areas-fill"]
+          layers: ["facility-icon", "tickets", "building-ages", "noise-points", "areas-fill"]
         });
 
         if (!features.length) return;
@@ -232,16 +298,26 @@ function MapView({ areasGeoJson, facilities, tickets, onAreaClick, onFacilityCli
     if (facilitySource) facilitySource.setData(facilitiesToFeatureCollection(filtered));
     const ticketSource = map.getSource(ticketSourceId) as mapboxgl.GeoJSONSource | undefined;
     if (ticketSource) ticketSource.setData(ticketsToFeatureCollection(tickets));
-  }, [areasGeoJson, facilities, tickets, facilityTypeFilter, facilityStatusFilter]);
+    const buildingAgeSource = map.getSource(buildingAgeSourceId) as mapboxgl.GeoJSONSource | undefined;
+    if (buildingAgeSource) buildingAgeSource.setData(buildingAgeToFeatureCollection(buildingAges));
+    const noiseSource = map.getSource(noiseSourceId) as mapboxgl.GeoJSONSource | undefined;
+    if (noiseSource) noiseSource.setData(noiseToFeatureCollection(noisePoints));
+    const fillPaint = areaFillPaint(backgroundMode, noiseTime);
+    map.setPaintProperty("areas-fill", "fill-color", fillPaint["fill-color"]);
+    map.setPaintProperty("areas-fill", "fill-opacity", fillPaint["fill-opacity"]);
+    map.setPaintProperty("noise-points", "circle-color", noiseCirclePaint(noiseTime));
+  }, [areasGeoJson, facilities, tickets, buildingAges, noisePoints, facilityTypeFilter, facilityStatusFilter, backgroundMode, noiseTime]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
     const layers: Record<keyof typeof activeLayers, string[]> = {
-      areas: ["areas-fill", "areas-outline"],
+      areas: ["areas-outline"],
       facilities: ["facility-icon"],
       tickets: ["tickets"],
-      heatmap: ["areas-fill"]
+      heatmap: ["areas-fill"],
+      buildingAges: ["building-ages"],
+      noisePoints: ["noise-points"]
     };
     Object.entries(layers).forEach(([key, ids]) => {
       ids.forEach(id => {
@@ -338,6 +414,90 @@ function filteredFacilities(facilities: Facility[], typeFilter: string[], status
     const statusPass = statusFilter[f.maintenanceStatus];
     return typePass && statusPass;
   });
+}
+
+function buildingAgeToFeatureCollection(points: BuildingAgePoint[]): GeoJSON.FeatureCollection<GeoJSON.Point> {
+  return {
+    type: "FeatureCollection",
+    features: points.map(p => ({
+      type: "Feature",
+      id: p.id,
+      geometry: { type: "Point", coordinates: p.coordinates },
+      properties: { id: p.id, age: p.ageYears }
+    }))
+  };
+}
+
+function noiseToFeatureCollection(points: NoisePoint[]): GeoJSON.FeatureCollection<GeoJSON.Point> {
+  return {
+    type: "FeatureCollection",
+    features: points.map(p => ({
+      type: "Feature",
+      id: p.id,
+      geometry: { type: "Point", coordinates: p.coordinates },
+      properties: {
+        id: p.id,
+        morning: p.morning,
+        afternoon: p.afternoon,
+        night: p.night
+      }
+    }))
+  };
+}
+
+function areaFillPaint(mode: BackgroundMode, noiseTime: NoiseTime): mapboxgl.FillPaint {
+  const valueKey =
+    mode === "gender_ratio"
+      ? "gender_ratio"
+      : mode === "avg_age"
+      ? "avg_age"
+      : mode === "building_age"
+      ? "building_age"
+      : mode === "safety"
+      ? "safety_score"
+      : mode === "noise"
+      ? (noiseTime === "morning" ? "noise_morning" : noiseTime === "afternoon" ? "noise_afternoon" : "noise_night")
+      : "risk";
+
+  if (mode === "gender_ratio") {
+    return {
+      "fill-color": ["interpolate", ["linear"], ["coalesce", ["get", valueKey], 50], 0, "#2563eb", 50, "#a855f7", 100, "#ef4444"],
+      "fill-opacity": 0.35
+    };
+  }
+  if (mode === "avg_age") {
+    return {
+      "fill-color": ["interpolate", ["linear"], ["coalesce", ["get", valueKey], 0], 0, "#1d4ed8", 35, "#f59e0b", 60, "#ef4444"],
+      "fill-opacity": 0.35
+    };
+  }
+  if (mode === "building_age") {
+    return {
+      "fill-color": ["interpolate", ["linear"], ["coalesce", ["get", valueKey], 0], 0, "#22c55e", 20, "#fbbf24", 40, "#f97316", 60, "#ef4444"],
+      "fill-opacity": 0.35
+    };
+  }
+  if (mode === "safety") {
+    return {
+      "fill-color": ["interpolate", ["linear"], ["coalesce", ["get", valueKey], 0], 0, "#ef4444", 30, "#fbbf24", 70, "#22c55e"],
+      "fill-opacity": 0.35
+    };
+  }
+  if (mode === "noise") {
+    return {
+      "fill-color": ["interpolate", ["linear"], ["coalesce", ["get", valueKey], 0], 30, "#22c55e", 60, "#fbbf24", 75, "#ef4444"],
+      "fill-opacity": 0.35
+    };
+  }
+  return {
+    "fill-color": ["interpolate", ["linear"], ["coalesce", ["get", valueKey], 0], 0, "#10b981", 40, "#f59e0b", 70, "#ef4444"],
+    "fill-opacity": 0.35
+  };
+}
+
+function noiseCirclePaint(time: NoiseTime) {
+  const prop = time === "morning" ? "morning" : time === "afternoon" ? "afternoon" : "night";
+  return ["interpolate", ["linear"], ["coalesce", ["get", prop], 0], 30, "#22c55e", 60, "#fbbf24", 75, "#ef4444"] as mapboxgl.DataDrivenPropertyValueSpecification<string>;
 }
 
 export default MapView;

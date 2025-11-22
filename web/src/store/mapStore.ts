@@ -2,17 +2,24 @@ import { create } from "zustand";
 import type mapboxgl from "mapbox-gl";
 
 export type Scenario =
-  | "home_safety"
-  | "official_priority"
   | "aging_infra"
-  | "incident_hotspots"
+  | "gender_ratio"
+  | "avg_age"
+  | "building_age"
+  | "safety"
+  | "noise"
   | "custom";
+
+export type BackgroundMode = "risk" | "gender_ratio" | "avg_age" | "building_age" | "safety" | "noise";
+export type NoiseTime = "morning" | "afternoon" | "night";
 
 type LayerToggles = {
   areas: boolean;
   facilities: boolean;
   tickets: boolean;
   heatmap: boolean;
+  buildingAges: boolean;
+  noisePoints: boolean;
 };
 
 export type FacilityStatusFilter = {
@@ -33,6 +40,8 @@ type MapState = {
   selectedAreaId?: string;
   facilityTypeFilter: string[];
   facilityStatusFilter: FacilityStatusFilter;
+  backgroundMode: BackgroundMode;
+  noiseTime: NoiseTime;
 };
 
 type MapActions = {
@@ -44,6 +53,8 @@ type MapActions = {
   toggleFacilityType: (type: string) => void;
   toggleFacilityStatus: (status: keyof FacilityStatusFilter, value?: boolean) => void;
   resetFacilityTypeFilter: () => void;
+  setBackgroundMode: (mode: BackgroundMode) => void;
+  setNoiseTime: (time: NoiseTime) => void;
 };
 
 export type MapStore = MapState & MapActions;
@@ -53,30 +64,71 @@ const defaultLayers: LayerToggles = {
   facilities: true,
   tickets: true,
   heatmap: true,
-};
-
-const scenarioLayerDefaults: Record<Scenario, Partial<LayerToggles>> = {
-  home_safety: { areas: true, facilities: true, tickets: true, heatmap: false },
-  official_priority: { areas: true, facilities: true, tickets: true, heatmap: true },
-  aging_infra: { areas: true, facilities: true, tickets: false, heatmap: true },
-  incident_hotspots: { areas: true, facilities: false, tickets: true, heatmap: true },
-  custom: {},
+  buildingAges: false,
+  noisePoints: false,
 };
 
 export const useMapStore = create<MapStore>((set) => ({
   viewport: { center: [120.642, 24.162], zoom: 11 },
-  selectedScenario: "official_priority",
+  selectedScenario: "aging_infra",
   activeLayers: defaultLayers,
   selectedFacilityId: undefined,
   selectedAreaId: undefined,
   facilityTypeFilter: [],
   facilityStatusFilter: { safe: true, in_progress: true, overdue: true },
+  backgroundMode: "risk",
+  noiseTime: "morning",
   setViewport: (viewport) => set({ viewport }),
   setScenario: (selectedScenario) =>
-    set((state) => ({
-      selectedScenario,
-      activeLayers: { ...state.activeLayers, ...scenarioLayerDefaults[selectedScenario] },
-    })),
+    set((state) => {
+      const baseLayers = { ...state.activeLayers, ...defaultLayers };
+      switch (selectedScenario) {
+        case "aging_infra":
+          return {
+            selectedScenario,
+            activeLayers: { ...baseLayers, facilities: true, tickets: false, buildingAges: false, noisePoints: false },
+            backgroundMode: "risk",
+            facilityTypeFilter: [],
+          };
+        case "gender_ratio":
+          return {
+            selectedScenario,
+            activeLayers: { ...baseLayers, facilities: false, tickets: false, buildingAges: false, noisePoints: false },
+            backgroundMode: "gender_ratio",
+            facilityTypeFilter: [],
+          };
+        case "avg_age":
+          return {
+            selectedScenario,
+            activeLayers: { ...baseLayers, facilities: false, tickets: false, buildingAges: false, noisePoints: false },
+            backgroundMode: "avg_age",
+            facilityTypeFilter: [],
+          };
+        case "building_age":
+          return {
+            selectedScenario,
+            activeLayers: { ...baseLayers, facilities: true, tickets: false, buildingAges: true, noisePoints: false },
+            backgroundMode: "building_age",
+            facilityTypeFilter: ["building"],
+          };
+        case "safety":
+          return {
+            selectedScenario,
+            activeLayers: { ...baseLayers, facilities: true, tickets: false, buildingAges: false, noisePoints: false },
+            backgroundMode: "safety",
+            facilityTypeFilter: ["cctv", "police_station"],
+          };
+        case "noise":
+          return {
+            selectedScenario,
+            activeLayers: { ...baseLayers, facilities: false, tickets: false, buildingAges: false, noisePoints: true },
+            backgroundMode: "noise",
+          };
+        case "custom":
+        default:
+          return { selectedScenario, activeLayers: baseLayers };
+      }
+    }),
   toggleLayer: (key, value) =>
     set((state) => {
       const nextLayers = { ...state.activeLayers, [key]: value ?? !state.activeLayers[key] };
@@ -101,4 +153,10 @@ export const useMapStore = create<MapStore>((set) => ({
       facilityStatusFilter: { ...state.facilityStatusFilter, [status]: value ?? !state.facilityStatusFilter[status] },
     })),
   resetFacilityTypeFilter: () => set({ facilityTypeFilter: [] }),
+  setBackgroundMode: (mode) =>
+    set((state) => ({
+      backgroundMode: mode,
+      selectedScenario: state.selectedScenario === "custom" ? "custom" : state.selectedScenario,
+    })),
+  setNoiseTime: (time) => set({ noiseTime: time }),
 }));
