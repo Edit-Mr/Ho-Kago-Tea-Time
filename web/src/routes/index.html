@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AR Object Detection</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #1a1a1a;
+            color: white;
+            overflow: hidden;
+        }
+
+        #container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #video {
+            max-width: 100%;
+            max-height: 100%;
+        }
+
+        #canvas {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            max-width: 100%;
+            max-height: 100%;
+        }
+
+        #status {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px 20px;
+            border-radius: 10px;
+            z-index: 100;
+        }
+
+        #status h2 {
+            font-size: 18px;
+            margin-bottom: 10px;
+            color: #4CAF50;
+        }
+
+        #status p {
+            font-size: 14px;
+            margin: 5px 0;
+        }
+
+        .loading {
+            color: #FFC107;
+        }
+
+        .ready {
+            color: #4CAF50;
+        }
+
+        .error {
+            color: #F44336;
+        }
+
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px 20px;
+            border-radius: 10px;
+            display: flex;
+            gap: 10px;
+            z-index: 100;
+        }
+
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.3s;
+        }
+
+        button:hover {
+            background: #45a049;
+        }
+
+        button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+
+        #toggleFilter {
+            background: #2196F3;
+        }
+
+        #toggleFilter:hover {
+            background: #0b7dda;
+        }
+
+        #toggleFilter.active {
+            background: #F44336;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <video id="video" autoplay playsinline></video>
+        <canvas id="canvas"></canvas>
+
+        <div id="status">
+            <h2>AR Object Detection</h2>
+            <p id="modelStatus" class="loading">Loading model...</p>
+            <p id="cameraStatus">Initializing camera...</p>
+            <p id="detectionStatus">Waiting...</p>
+        </div>
+
+        <div id="controls">
+            <button id="toggleFilter" class="active">Person Filter: ON</button>
+            <button id="toggleDetection">Pause Detection</button>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.11.0"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3"></script>
+
+    <script>
+        let model;
+        let video;
+        let canvas;
+        let ctx;
+        let filterPerson = true;
+        let detectionActive = true;
+        let animationId;
+
+        const objectInfo = {
+            'bottle': {
+                description: 'A container for liquids',
+                properties: ['Portable', 'Recyclable', 'Common household item']
+            },
+            'cup': {
+                description: 'A drinking vessel',
+                properties: ['Used for beverages', 'Various materials', 'Everyday utensil']
+            },
+            'cell phone': {
+                description: 'A mobile communication device',
+                properties: ['Smart device', 'Portable', 'Multi-functional']
+            },
+            'laptop': {
+                description: 'A portable computer',
+                properties: ['Computing device', 'Work tool', 'Internet capable']
+            },
+            'mouse': {
+                description: 'A computer input device',
+                properties: ['Pointing device', 'USB/Wireless', 'Desktop accessory']
+            },
+            'keyboard': {
+                description: 'A computer input device',
+                properties: ['Typing interface', 'Multiple keys', 'Essential peripheral']
+            },
+            'book': {
+                description: 'A written or printed work',
+                properties: ['Knowledge source', 'Portable', 'Educational material']
+            },
+            'clock': {
+                description: 'A time-telling device',
+                properties: ['Shows time', 'Wall or desk mounted', 'Essential household item']
+            },
+            'chair': {
+                description: 'A piece of furniture for sitting',
+                properties: ['Seating furniture', 'Various styles', 'Common in homes/offices']
+            },
+            'tv': {
+                description: 'A television display',
+                properties: ['Entertainment device', 'Visual display', 'Electronic screen']
+            },
+            'default': {
+                description: 'An object detected by the system',
+                properties: ['Common item', 'Everyday object', 'Recognizable shape']
+            }
+        };
+
+        async function setupCamera() {
+            video = document.getElementById('video');
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        facingMode: 'user',
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    }
+                });
+
+                video.srcObject = stream;
+
+                return new Promise((resolve) => {
+                    video.onloadedmetadata = () => {
+                        canvas = document.getElementById('canvas');
+                        canvas.width = video.videoWidth;
+                        canvas.height = video.videoHeight;
+                        ctx = canvas.getContext('2d');
+                        document.getElementById('cameraStatus').textContent = 'Camera: Ready';
+                        document.getElementById('cameraStatus').className = 'ready';
+                        resolve();
+                    };
+                });
+            } catch (error) {
+                document.getElementById('cameraStatus').textContent = 'Camera: Error - ' + error.message;
+                document.getElementById('cameraStatus').className = 'error';
+                throw error;
+            }
+        }
+
+        async function loadModel() {
+            try {
+                model = await cocoSsd.load();
+                document.getElementById('modelStatus').textContent = 'Model: Loaded';
+                document.getElementById('modelStatus').className = 'ready';
+            } catch (error) {
+                document.getElementById('modelStatus').textContent = 'Model: Error - ' + error.message;
+                document.getElementById('modelStatus').className = 'error';
+                throw error;
+            }
+        }
+
+        function drawDetection(prediction) {
+            const [x, y, width, height] = prediction.bbox;
+            const centerX = x + width / 2;
+            const centerY = y + height / 2;
+
+            ctx.strokeStyle = '#00FF00';
+            ctx.lineWidth = 3;
+            ctx.strokeRect(x, y, width, height);
+
+            const info = objectInfo[prediction.class] || objectInfo['default'];
+            const confidence = (prediction.score * 100).toFixed(1);
+
+            const padding = 15;
+            const lineHeight = 20;
+            const maxWidth = 300;
+
+            ctx.font = 'bold 16px Arial';
+            const titleText = `${prediction.class.toUpperCase()} (${confidence}%)`;
+            const titleWidth = ctx.measureText(titleText).width;
+
+            ctx.font = '14px Arial';
+            const descWidth = ctx.measureText(info.description).width;
+
+            const boxWidth = Math.min(Math.max(titleWidth, descWidth) + padding * 2, maxWidth);
+            const boxHeight = padding * 2 + lineHeight * 2 + (info.properties.length * lineHeight);
+
+            let boxX = centerX - boxWidth / 2;
+            let boxY = centerY - boxHeight / 2;
+
+            if (boxX < 0) boxX = 10;
+            if (boxX + boxWidth > canvas.width) boxX = canvas.width - boxWidth - 10;
+            if (boxY < 0) boxY = 10;
+            if (boxY + boxHeight > canvas.height) boxY = canvas.height - boxHeight - 10;
+
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+            ctx.fillRect(boxX, boxY, boxWidth, boxHeight);
+
+            ctx.strokeStyle = '#00FF00';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(boxX, boxY, boxWidth, boxHeight);
+
+            let textY = boxY + padding + lineHeight;
+
+            ctx.fillStyle = '#00FF00';
+            ctx.font = 'bold 16px Arial';
+            ctx.fillText(titleText, boxX + padding, textY);
+
+            textY += lineHeight;
+            ctx.fillStyle = '#FFFFFF';
+            ctx.font = '14px Arial';
+            ctx.fillText(info.description, boxX + padding, textY);
+
+            textY += lineHeight;
+            ctx.fillStyle = '#CCCCCC';
+            ctx.font = '12px Arial';
+            info.properties.forEach((prop, index) => {
+                ctx.fillText(`• ${prop}`, boxX + padding, textY);
+                textY += lineHeight;
+            });
+
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, 5, 0, 2 * Math.PI);
+            ctx.fillStyle = '#FF0000';
+            ctx.fill();
+        }
+
+        async function detectObjects() {
+            if (!detectionActive) {
+                animationId = requestAnimationFrame(detectObjects);
+                return;
+            }
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            try {
+                const predictions = await model.detect(video);
+
+                let filteredPredictions = predictions;
+                if (filterPerson) {
+                    filteredPredictions = predictions.filter(pred => pred.class !== 'person');
+                }
+
+                filteredPredictions.forEach(prediction => {
+                    drawDetection(prediction);
+                });
+
+                document.getElementById('detectionStatus').textContent =
+                    `Detected: ${filteredPredictions.length} object(s)`;
+                document.getElementById('detectionStatus').className = 'ready';
+            } catch (error) {
+                console.error('Detection error:', error);
+                document.getElementById('detectionStatus').textContent = 'Detection: Error';
+                document.getElementById('detectionStatus').className = 'error';
+            }
+
+            animationId = requestAnimationFrame(detectObjects);
+        }
+
+        document.getElementById('toggleFilter').addEventListener('click', (e) => {
+            filterPerson = !filterPerson;
+            const button = e.target;
+            button.textContent = `Person Filter: ${filterPerson ? 'ON' : 'OFF'}`;
+            button.className = filterPerson ? 'active' : '';
+        });
+
+        document.getElementById('toggleDetection').addEventListener('click', (e) => {
+            detectionActive = !detectionActive;
+            e.target.textContent = detectionActive ? 'Pause Detection' : 'Resume Detection';
+            if (!detectionActive) {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                document.getElementById('detectionStatus').textContent = 'Detection: Paused';
+            }
+        });
+
+        async function init() {
+            try {
+                await setupCamera();
+                await loadModel();
+                detectObjects();
+            } catch (error) {
+                console.error('Initialization error:', error);
+                alert('Failed to initialize AR system. Please check camera permissions and refresh the page.');
+            }
+        }
+
+        window.addEventListener('load', init);
+
+        window.addEventListener('beforeunload', () => {
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+            }
+            if (video && video.srcObject) {
+                video.srcObject.getTracks().forEach(track => track.stop());
+            }
+        });
+    </script>
+</body>
+</html>
