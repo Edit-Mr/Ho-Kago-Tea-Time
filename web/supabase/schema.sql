@@ -51,11 +51,12 @@ $$;
 -- FACILITIES
 create table if not exists public.facilities (
   id uuid primary key default gen_random_uuid(),
-  type text not null check (type in ('building','street_light','park','public_toilet','bridge','road','bike_station','cctv','hazardous_factory','police_station')),
+  type text not null check (type in ('building','street_light','park','public_toilet','bridge','road','bike_station','cctv','hazardous_factory','police_station','wifi_hotspot')),
   name text not null,
   geom geometry(Point,4326) not null,
   health_grade text check (health_grade in ('A','B','C')),
-  last_inspection_at timestamptz
+  last_inspection_at timestamptz,
+  description text
 );
 create index if not exists facilities_geom_idx on public.facilities using gist (geom);
 
@@ -169,6 +170,7 @@ create table if not exists public.building_ages (
   name text not null,
   geom geometry(Point,4326) not null,
   age_years int not null check (age_years >= 0),
+  description text,                -- ★ 新增
   created_at timestamptz default now()
 );
 create index if not exists building_ages_geom_idx on public.building_ages using gist (geom);
