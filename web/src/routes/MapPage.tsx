@@ -77,20 +77,27 @@ function MapPage() {
   }, [loadAll]);
 
   const lastFetchCenterRef = useRef<[number, number] | null>(null);
+  const fetchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Fetch only when we pan outside the currently loaded areas; stay put otherwise to avoid marker flicker.
   useEffect(() => {
-    const areaFromCenter = viewport.center as [number, number];
-    const insideKnownArea = areas.some(a => a.geom && isPointInsideGeometry(areaFromCenter, a.geom as GeoJSON.Geometry));
-    const sameAsLastFetch =
-      lastFetchCenterRef.current &&
-      distanceSq(lastFetchCenterRef.current, areaFromCenter) < 1e-10;
-    if (!insideKnownArea && !sameAsLastFetch && !loading) {
-      lastFetchCenterRef.current = areaFromCenter;
-      loadAll({ center: areaFromCenter }).catch(() => {
-        // error handled via store state
-      });
-    }
+    if (fetchDebounceRef.current) clearTimeout(fetchDebounceRef.current);
+    fetchDebounceRef.current = setTimeout(() => {
+      const areaFromCenter = viewport.center as [number, number];
+      const insideKnownArea = areas.some(a => a.geom && isPointInsideGeometry(areaFromCenter, a.geom as GeoJSON.Geometry));
+      const sameAsLastFetch =
+        lastFetchCenterRef.current &&
+        distanceSq(lastFetchCenterRef.current, areaFromCenter) < 1e-10;
+      if (!insideKnownArea && !sameAsLastFetch && !loading) {
+        lastFetchCenterRef.current = areaFromCenter;
+        loadAll({ center: areaFromCenter }).catch(() => {
+          // error handled via store state
+        });
+      }
+    }, 500);
+    return () => {
+      if (fetchDebounceRef.current) clearTimeout(fetchDebounceRef.current);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewport.center, areas, loading]);
 

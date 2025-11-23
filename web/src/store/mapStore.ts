@@ -59,6 +59,17 @@ type MapActions = {
 
 export type MapStore = MapState & MapActions;
 
+const defaultVisibleFacilityTypes = [
+  "building",
+  "park",
+  "public_toilet",
+  "bridge",
+  "road",
+  "bike_station",
+  "hazardous_factory",
+  "police_station"
+] as const;
+
 const defaultLayers: LayerToggles = {
   areas: true,
   facilities: true,
@@ -69,12 +80,12 @@ const defaultLayers: LayerToggles = {
 };
 
 export const useMapStore = create<MapStore>((set) => ({
-  viewport: { center: [120.642, 24.162], zoom: 11 },
+  viewport: { center: [120.9647, 24.8038], zoom: 11 },
   selectedScenario: "aging_infra",
   activeLayers: defaultLayers,
   selectedFacilityId: undefined,
   selectedAreaId: undefined,
-  facilityTypeFilter: [],
+  facilityTypeFilter: [...defaultVisibleFacilityTypes],
   facilityStatusFilter: { safe: true, in_progress: true, overdue: true },
   backgroundMode: "risk",
   noiseTime: "morning",
@@ -88,7 +99,7 @@ export const useMapStore = create<MapStore>((set) => ({
             selectedScenario,
             activeLayers: { ...baseLayers, facilities: true, tickets: false, buildingAges: false, noisePoints: false },
             backgroundMode: "risk",
-            facilityTypeFilter: [],
+            facilityTypeFilter: [...defaultVisibleFacilityTypes],
           };
         case "gender_ratio":
           return {

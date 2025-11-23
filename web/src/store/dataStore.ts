@@ -2,6 +2,8 @@ import { create } from "zustand";
 import type GeoJSON from "geojson";
 import { fetchAreaByPoint, fetchAreaRiskSnapshots, fetchAreas, fetchFacilities, fetchFacilityInspections, fetchFacilityTypes, fetchTicketEvents, fetchTickets, fetchBuildingAges, fetchNoiseMeasurements } from "../lib/api";
 
+let currentLoadToken = 0;
+
 export type AreaRecord = {
   id: string;
   name: string;
@@ -82,6 +84,8 @@ export const useDataStore = create<DataState>((set, get) => ({
   loading: false,
   error: undefined,
   loadAll: async (opts) => {
+    const token = ++currentLoadToken;
+    const isStale = () => token !== currentLoadToken;
     try {
       const onlyNeedLightAreas = !!opts?.lightAreas && !opts?.areaId && !opts?.center;
       const namesOnly = !!opts?.namesOnly;
@@ -98,6 +102,7 @@ export const useDataStore = create<DataState>((set, get) => ({
       const needsGeom = !opts?.lightAreas || !!opts?.center;
       if (opts?.center && needsGeom) {
         const areaByPoint = await fetchAreaByPoint(opts.center);
+        if (isStale()) return;
         if (areaByPoint.error) throw new Error(areaByPoint.error);
         areaFromPoint = areaByPoint.data;
         countyFilter = areaFromPoint?.county;
@@ -130,6 +135,7 @@ export const useDataStore = create<DataState>((set, get) => ({
             ? { county: countyFilter, select: areaSelect, level: "village" }
             : { select: areaSelect, level: "village" }
       );
+      if (isStale()) return;
       if (areasRes.error) throw new Error(areasRes.error);
 
       const areas = areasRes.data?.map((a) => ({
@@ -146,6 +152,7 @@ export const useDataStore = create<DataState>((set, get) => ({
       if (areas.some((a) => !a.county)) throw new Error("區域資料缺少 county 欄位或值，請確認資料庫縣市欄位已填寫");
 
       if (onlyNeedLightAreas && namesOnly) {
+        if (isStale()) return;
         set((prev) => ({
           areas,
           areaOptions: areas.map(({ id, name, code, county }) => ({ id, name, code, county })),
@@ -184,6 +191,7 @@ export const useDataStore = create<DataState>((set, get) => ({
       }
 
       const [facilitiesRes, ticketsRes] = await Promise.all([fetchFacilities(), fetchTickets(targetAreaId)]);
+      if (isStale()) return;
       if (facilitiesRes.error) throw new Error(facilitiesRes.error);
       if (ticketsRes.error) throw new Error(ticketsRes.error);
 
@@ -193,6 +201,7 @@ export const useDataStore = create<DataState>((set, get) => ({
         fetchBuildingAges(),
         fetchNoiseMeasurements()
       ]);
+      if (isStale()) return;
       if (facilityTypesRes.error) throw new Error(facilityTypesRes.error);
       if (buildingAgesRes.error) throw new Error(buildingAgesRes.error);
       if (noiseRes.error) throw new Error(noiseRes.error);
@@ -295,6 +304,7 @@ export const useDataStore = create<DataState>((set, get) => ({
         return filteredAreas.some((a) => a.geom && isPointInsideGeometry(f.coords as [number, number], a.geom as GeoJSON.Geometry));
       });
 
+      if (isStale()) return;
       set({
         areas: filteredAreas,
         areaOptions: get().areaOptions.length > 0 ? get().areaOptions : areas.map(({ id, name, code, county }) => ({ id, name, code, county })),
@@ -311,6 +321,7 @@ export const useDataStore = create<DataState>((set, get) => ({
         error: undefined,
       });
     } catch (err) {
+      if (isStale()) return;
       const message = err instanceof Error ? err.message : "Failed to load data";
       set({ error: message, loading: false });
     }
