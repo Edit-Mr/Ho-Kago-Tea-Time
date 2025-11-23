@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Link, Navigate, Route, Routes } from "react-router-dom";
 import MapPage from "./routes/MapPage";
 import DashboardPage from "./routes/DashboardPage";
@@ -42,10 +43,7 @@ function App() {
           <Route
             path="/slide"
             element={
-              <Navigate
-                to="https://www.figma.com/slides/z0wx5cO3Dgx38QmrrgdFG1/%E5%9F%8E%E8%A6%96-CitySight?node-id=15-1971&t=9mgQp282UP6IEPDP-1"
-                replace
-              />
+              <ExternalRedirect to="https://www.figma.com/slides/z0wx5cO3Dgx38QmrrgdFG1/%E5%9F%8E%E8%A6%96-CitySight?node-id=15-1971&t=9mgQp282UP6IEPDP-1" />
             }
           />
           <Route path="*" element={<Navigate to="/" replace />} />
@@ -81,6 +79,13 @@ function NavLink({ to, children }: { to: string; children: React.ReactNode }) {
       {children}
     </Link>
   );
+}
+
+function ExternalRedirect({ to }: { to: string }) {
+  useEffect(() => {
+    window.location.href = to;
+  }, [to]);
+  return null;
 }
 
 export default App;
