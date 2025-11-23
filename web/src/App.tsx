@@ -39,6 +39,15 @@ function App() {
           <Route path="/dashboard/:areaId" element={<DashboardPage />} />
           <Route path="/admin" element={<AdminPage />} />
           <Route path="/missions" element={<MissionsPage />} />
+          <Route
+            path="/slide"
+            element={
+              <Navigate
+                to="https://www.figma.com/slides/z0wx5cO3Dgx38QmrrgdFG1/%E5%9F%8E%E8%A6%96-CitySight?node-id=15-1971&t=9mgQp282UP6IEPDP-1"
+                replace
+              />
+            }
+          />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
 
