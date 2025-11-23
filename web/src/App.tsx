@@ -4,6 +4,7 @@ import MapPage from "./routes/MapPage";
 import DashboardPage from "./routes/DashboardPage";
 import AdminPage from "./routes/AdminPage";
 import MissionsPage from "./routes/MissionsPage";
+import AboutPage from "./routes/AboutPage";
 import ChatbotPanel from "./components/ChatbotPanel";
 import { useUiStore } from "./store/uiStore";
 import { Button } from "./components/ui/button";
@@ -30,6 +31,7 @@ function App() {
           <NavLink to="/dashboard">儀表板</NavLink>
           <NavLink to="/admin">管理員</NavLink>
           <NavLink to="/missions">任務牆</NavLink>
+          <NavLink to="/about">關於</NavLink>
         </nav>
       </header>
 
@@ -40,6 +42,7 @@ function App() {
           <Route path="/dashboard/:areaId" element={<DashboardPage />} />
           <Route path="/admin" element={<AdminPage />} />
           <Route path="/missions" element={<MissionsPage />} />
+          <Route path="/about" element={<AboutPage />} />
           <Route
             path="/slide"
             element={
