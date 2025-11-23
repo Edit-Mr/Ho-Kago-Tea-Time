@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type GeoJSON from "geojson";
-import { fetchAreaByPoint, fetchAreaRiskSnapshots, fetchAreas, fetchFacilities, fetchFacilityInspections, fetchFacilityTypes, fetchTicketEvents, fetchTickets, fetchBuildingAges, fetchNoiseMeasurements } from "../lib/api";
+import { fetchAreaByPoint, fetchAreaRiskSnapshots, fetchAreas, fetchFacilities, fetchFacilityTypes, fetchTicketEvents, fetchTickets, fetchBuildingAges, fetchNoiseMeasurements } from "../lib/api";
 
 let currentLoadToken = 0;
 
@@ -195,6 +195,8 @@ export const useDataStore = create<DataState>((set, get) => ({
       if (facilitiesRes.error) throw new Error(facilitiesRes.error);
       if (ticketsRes.error) throw new Error(ticketsRes.error);
 
+      const ticketIds = ticketsRes.data?.map((t) => t.id) ?? [];
+
       const [riskRes, facilityTypesRes, buildingAgesRes, noiseRes] = await Promise.all([
         fetchAreaRiskSnapshots(),
         fetchFacilityTypes(),
@@ -206,12 +208,6 @@ export const useDataStore = create<DataState>((set, get) => ({
       if (buildingAgesRes.error) throw new Error(buildingAgesRes.error);
       if (noiseRes.error) throw new Error(noiseRes.error);
 
-      const facilityIds = facilitiesRes.data?.map((f) => f.id) ?? [];
-      const ticketIds = ticketsRes.data?.map((t) => t.id) ?? [];
-      const [inspectionsRes, ticketEventsRes] = await Promise.all([fetchFacilityInspections(facilityIds), fetchTicketEvents(ticketIds)]);
-      if (inspectionsRes.error) throw new Error(inspectionsRes.error);
-      if (ticketEventsRes.error) throw new Error(ticketEventsRes.error);
-
       const latestRiskByArea = new Map<string, { score: number; at: number }>();
       riskRes.data?.forEach((r) => {
         const existing = latestRiskByArea.get(r.areaId);
@@ -221,23 +217,10 @@ export const useDataStore = create<DataState>((set, get) => ({
         }
       });
 
-      const latestInspectionByFacility = new Map<string, { incidentCount?: number; notes?: string | null; inspectedAt: string }>();
-      inspectionsRes.data?.forEach((row) => {
-        const prev = latestInspectionByFacility.get(row.facilityId);
-        if (!prev || new Date(row.inspectedAt).getTime() > new Date(prev.inspectedAt).getTime()) {
-          latestInspectionByFacility.set(row.facilityId, {
-            incidentCount: row.incidentCountLastYear ?? undefined,
-            notes: row.notes,
-            inspectedAt: row.inspectedAt,
-          });
-        }
-      });
-
       const typeMeta = new Map<string, { labelZh: string; emoji?: string | null; iconName?: string | null }>();
       facilityTypesRes.data?.forEach((t) => typeMeta.set(t.type, { labelZh: t.labelZh, emoji: t.emoji, iconName: t.iconName }));
 
-      const facilitiesMapped = facilitiesRes.data?.map((f) => {
-        const latestInspection = latestInspectionByFacility.get(f.id);
+      const facilitiesMappedBase = facilitiesRes.data?.map((f) => {
         const meta = typeMeta.get(f.type);
         return {
           id: f.id,
@@ -248,9 +231,9 @@ export const useDataStore = create<DataState>((set, get) => ({
           name: f.name,
           coords: (f.geom as GeoJSON.Point | undefined)?.coordinates as [number, number] | undefined,
           grade: (f.healthGrade as FacilityRecord["grade"]) ?? undefined,
-          lastInspection: latestInspection?.inspectedAt ?? f.lastInspectionAt ?? undefined,
-          incidentsPastYear: latestInspection?.incidentCount ?? undefined,
-          latestInspectionNotes: latestInspection?.notes ?? null,
+          lastInspection: f.lastInspectionAt ?? undefined,
+          incidentsPastYear: undefined,
+          latestInspectionNotes: null,
         } satisfies FacilityRecord;
       }) ?? [];
 
@@ -299,10 +282,14 @@ export const useDataStore = create<DataState>((set, get) => ({
       const filteredRisk = (riskRes.data ?? []).filter((r) => filteredAreas.some((a) => a.id === r.areaId));
 
       // Filter facilities by geometry - only include facilities within the filtered areas
-      const facilities = facilitiesMapped.filter((f) => {
+      const facilities = facilitiesMappedBase.filter((f) => {
         if (!f.coords) return false;
         return filteredAreas.some((a) => a.geom && isPointInsideGeometry(f.coords as [number, number], a.geom as GeoJSON.Geometry));
       });
+
+      const ticketEventsRes = await fetchTicketEvents(ticketIds);
+      if (isStale()) return;
+      if (ticketEventsRes.error) throw new Error(ticketEventsRes.error);
 
       if (isStale()) return;
       set({
