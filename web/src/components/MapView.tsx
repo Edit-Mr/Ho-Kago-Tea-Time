@@ -49,6 +49,7 @@ type AreaProps = {
   avg_age?: number;
   building_age?: number;
   safety_score?: number;
+  safety_norm?: number;
   noise_morning?: number;
   noise_afternoon?: number;
   noise_night?: number;
@@ -461,13 +462,13 @@ function areaFillPaint(mode: BackgroundMode, noiseTime: NoiseTime): mapboxgl.Fil
 
   if (mode === "gender_ratio") {
     return {
-      "fill-color": ["interpolate", ["linear"], ["coalesce", ["get", valueKey], 50], 0, "#2563eb", 50, "#a855f7", 100, "#ef4444"],
+      "fill-color": ["interpolate", ["linear"], ["coalesce", ["get", valueKey], 50], 40, "#ef4444", 60, "#2563eb"],
       "fill-opacity": 0.35
     };
   }
   if (mode === "avg_age") {
     return {
-      "fill-color": ["interpolate", ["linear"], ["coalesce", ["get", valueKey], 0], 0, "#1d4ed8", 35, "#f59e0b", 60, "#ef4444"],
+      "fill-color": ["interpolate", ["linear"], ["coalesce", ["get", valueKey], 0], 32, "#1d4ed8",  70, "#ef4444"],
       "fill-opacity": 0.35
     };
   }
@@ -479,7 +480,17 @@ function areaFillPaint(mode: BackgroundMode, noiseTime: NoiseTime): mapboxgl.Fil
   }
   if (mode === "safety") {
     return {
-      "fill-color": ["interpolate", ["linear"], ["coalesce", ["get", valueKey], 0], 0, "#ef4444", 30, "#fbbf24", 70, "#22c55e"],
+      "fill-color": [
+        "interpolate",
+        ["linear"],
+        ["coalesce", ["get", "safety_norm"], 0],
+        0,
+        "#ef4444",
+        0.5,
+        "#fbbf24",
+        1,
+        "#22c55e"
+      ],
       "fill-opacity": 0.35
     };
   }

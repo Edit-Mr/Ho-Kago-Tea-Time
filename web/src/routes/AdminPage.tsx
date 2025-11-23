@@ -1,41 +1,36 @@
-import { useEffect, useMemo } from "react";
+import { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { AlertTriangle, Clock3, Circle } from "lucide-react";
-import { useDataStore } from "../store/dataStore";
-import { deriveTicketStatus, type TicketStatusCompact } from "../utils/tickets";
+import { type TicketStatusCompact } from "../utils/tickets";
 
 function AdminPage() {
-  const { tickets, facilities, loadAll } = useDataStore();
+  const demoTickets = useMemo(
+    () => [
+      { id: "t1", title: "路燈故障 - 光復路 #12", status: "overdue" as TicketStatusCompact, severity: 3, due: "2024-11-25" },
+      { id: "t2", title: "公園滑梯鬆動 - 關新公園", status: "within_sla" as TicketStatusCompact, severity: 2, due: "2024-12-05" },
+      { id: "t3", title: "監視器畫面模糊 - 科園路 #3", status: "within_sla" as TicketStatusCompact, severity: 1, due: "2024-12-03" },
+      { id: "t4", title: "人行道破損 - 經國路", status: "overdue" as TicketStatusCompact, severity: 2, due: "2024-11-20" },
+      { id: "t5", title: "雨水溝蓋鬆脫 - 中央路", status: "open" as TicketStatusCompact, severity: 1, due: "2024-12-18" },
+      { id: "t6", title: "派出所外牆滲水 - 中壢派出所", status: "open" as TicketStatusCompact, severity: 2, due: "2024-12-22" },
+      { id: "t7", title: "道路坑洞 - 香山步道口", status: "within_sla" as TicketStatusCompact, severity: 2, due: "2024-12-01" }
+    ],
+    []
+  );
 
-  useEffect(() => {
-    loadAll().catch(() => {});
-  }, [loadAll]);
-
-  const ticketRows = useMemo(() => {
-    return tickets
-      .map((t) => ({
-        id: t.id,
-        title: t.description ?? t.type,
-        status: deriveTicketStatus(t) ?? "open",
-        severity: t.severity ?? 1,
-        due: t.slaDueAt ? new Date(t.slaDueAt).toISOString().slice(0, 10) : "—",
-      }))
-      .sort((a, b) => a.due.localeCompare(b.due));
-  }, [tickets]);
-
-  const upcomingInspections = useMemo(() => {
-    return facilities
-      .filter((f) => f.lastInspection)
-      .map((f) => {
-        const last = f.lastInspection ? new Date(f.lastInspection).getTime() : Date.now();
-        const nextDue = last + 30 * 24 * 60 * 60 * 1000;
-        const daysLeft = Math.max(0, Math.round((nextDue - Date.now()) / (1000 * 60 * 60 * 24)));
-        return { id: f.id, name: f.name, type: f.type, dueInDays: daysLeft };
-      })
-      .sort((a, b) => a.dueInDays - b.dueInDays)
-      .slice(0, 10);
-  }, [facilities]);
+  const demoInspections = useMemo(
+    () => [
+      { id: "f1", name: "關新公園", type: "park", dueInDays: 4 },
+      { id: "f2", name: "光復路路燈 #12", type: "street_light", dueInDays: 7 },
+      { id: "f3", name: "經國派出所", type: "police_station", dueInDays: 12 },
+      { id: "f4", name: "青草湖步道", type: "road", dueInDays: 2 },
+      { id: "f5", name: "香山海岸公園", type: "park", dueInDays: 15 },
+      { id: "f6", name: "桃園藝文特區路燈 #21", type: "street_light", dueInDays: 9 },
+      { id: "f7", name: "中壢國民運動中心", type: "building", dueInDays: 18 },
+      { id: "f8", name: "科園路監視器 #3", type: "cctv", dueInDays: 6 }
+    ],
+    []
+  );
 
   return (
     <div className="px-6 py-6 space-y-4">
@@ -56,7 +51,7 @@ function AdminPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800">
-                {ticketRows.map((ticket) => (
+                {demoTickets.map((ticket) => (
                   <tr key={ticket.id}>
                     <td className="py-2 text-slate-100">{ticket.title}</td>
                     <td>{renderStatusChip(ticket.status)}</td>
@@ -83,7 +78,7 @@ function AdminPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800">
-                {upcomingInspections.map((f) => (
+                {demoInspections.map((f) => (
                   <tr key={f.id}>
                     <td className="py-2 text-slate-100">{f.name}</td>
                     <td className="text-slate-300 capitalize">{f.type}</td>

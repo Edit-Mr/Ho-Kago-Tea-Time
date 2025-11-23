@@ -25,6 +25,7 @@ type AreaFeatureProps = {
   avg_age?: number;
   building_age?: number;
   safety_score?: number;
+  safety_norm?: number;
   noise_morning?: number;
   noise_afternoon?: number;
   noise_night?: number;
@@ -206,6 +207,21 @@ function MapPage() {
     return map;
   }, [areas, facilities]);
 
+  const safetyRange = useMemo(() => {
+    let min = Infinity;
+    let max = -Infinity;
+    const currentCounty = areas.find(a => a.id === (useMapStore.getState().selectedAreaId ?? ""))?.county ?? areas[0]?.county;
+    const subset = areas.filter(a => a.county === currentCounty);
+    subset.forEach(area => {
+      const score = safetyScoreByArea.get(area.id);
+      if (score === undefined) return;
+      min = Math.min(min, score);
+      max = Math.max(max, score);
+    });
+    if (min === Infinity) return { min: 0, max: 0 };
+    return { min, max };
+  }, [areas, safetyScoreByArea]);
+
   const areaSummaries: AreaSummary[] = useMemo(() => {
     return areas.map(a => {
       const openTickets = ticketsWithArea.filter(t => t.areaId === a.id && t.status !== "completed" && t.status !== "cancelled");
@@ -309,6 +325,10 @@ function MapPage() {
           avg_age: a.weightedAvgAge ?? undefined,
           building_age: avgBuildingAgeByArea.get(a.id) ?? undefined,
           safety_score: safetyScoreByArea.get(a.id) ?? undefined,
+          safety_norm:
+            safetyScoreByArea.get(a.id) === undefined || safetyRange.max === safetyRange.min
+              ? undefined
+              : ((safetyScoreByArea.get(a.id) ?? 0) - safetyRange.min) / Math.max(1, safetyRange.max - safetyRange.min),
           noise_morning: noiseAverageByArea.get(a.id)?.morning ?? undefined,
           noise_afternoon: noiseAverageByArea.get(a.id)?.afternoon ?? undefined,
           noise_night: noiseAverageByArea.get(a.id)?.night ?? undefined
@@ -316,7 +336,7 @@ function MapPage() {
         geometry: a.geom as GeoJSON.Polygon | GeoJSON.MultiPolygon
       }))
     }),
-    [areas, riskByArea, avgBuildingAgeByArea, safetyScoreByArea, noiseAverageByArea]
+    [areas, riskByArea, avgBuildingAgeByArea, safetyScoreByArea, noiseAverageByArea, safetyRange]
   );
 
   const uniqueFacilityTypes = useMemo(() => {

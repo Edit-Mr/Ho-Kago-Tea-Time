@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
-import type GeoJSON from "geojson";
+import { useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -7,7 +6,6 @@ import { Input } from "../components/ui/input";
 import { Select } from "../components/ui/select";
 import { Textarea } from "../components/ui/textarea";
 import { Drawer } from "../components/ui/drawer";
-import { useDataStore } from "../store/dataStore";
 
 type ReportForm = {
   isHealthy: "yes" | "no" | "";
@@ -16,68 +14,61 @@ type ReportForm = {
   photo?: File | null;
 };
 
-function isPointInsideGeometry(point: [number, number], geom?: GeoJSON.Geometry): boolean {
-  if (!geom) return false;
-  if (geom.type === "Polygon") return isPointInPolygon(point, geom.coordinates as GeoJSON.Position[][]);
-  if (geom.type === "MultiPolygon") return (geom.coordinates as GeoJSON.Position[][][]).some(poly => isPointInPolygon(point, poly));
-  return false;
-}
-
-function isPointInPolygon(point: [number, number], rings: GeoJSON.Position[][]): boolean {
-  const [lng, lat] = point;
-  let inside = false;
-  const ring = rings[0];
-  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-    const xi = ring[i][0], yi = ring[i][1];
-    const xj = ring[j][0], yj = ring[j][1];
-    const intersect = yi > lat !== yj > lat && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi;
-    if (intersect) inside = !inside;
-  }
-  return inside;
-}
-
 function MissionsPage() {
   const [area, setArea] = useState("all");
   const [type, setType] = useState("all");
   const [keyword, setKeyword] = useState("");
   const [reportingFacilityId, setReportingFacilityId] = useState<string | null>(null);
   const [reportForm, setReportForm] = useState<ReportForm>({ isHealthy: "", maintenanceType: "", note: "", photo: null });
-  const { areas, facilities, facilityTypes, loadAll } = useDataStore();
-
-  useEffect(() => {
-    loadAll().catch(() => {});
-  }, [loadAll]);
+  const demoAreas = useMemo(
+    () => [
+      { id: "hsinchu-east", name: "竹市東區" },
+      { id: "hsinchu-north", name: "竹市北區" },
+      { id: "hsinchu-xiangshan", name: "竹市香山" },
+      { id: "taoyuan-zhongli", name: "桃園中壢" },
+      { id: "taoyuan-taoyuan", name: "桃園桃園區" }
+    ],
+    []
+  );
+  const demoFacilities = useMemo(
+    () => [
+      { id: "f1", name: "關新公園", type: "park", lastInspection: "2024-11-01", areaId: "hsinchu-east" },
+      { id: "f2", name: "青草湖步道", type: "road", lastInspection: "2024-10-12", areaId: "hsinchu-xiangshan" },
+      { id: "f3", name: "香山海岸公園", type: "park", lastInspection: "2024-09-28", areaId: "hsinchu-xiangshan" },
+      { id: "f4", name: "陽明公園", type: "park", lastInspection: "2024-10-25", areaId: "hsinchu-east" },
+      { id: "f5", name: "桃園藝文特區步道", type: "road", lastInspection: "2024-10-05", areaId: "taoyuan-taoyuan" },
+      { id: "f6", name: "中壢中央公園", type: "park", lastInspection: "2024-10-15", areaId: "taoyuan-zhongli" },
+      { id: "f7", name: "中壢國民運動中心", type: "building", lastInspection: "2024-10-20", areaId: "taoyuan-zhongli" },
+      { id: "f8", name: "元培醫院旁人行道", type: "road", lastInspection: "2024-10-18", areaId: "hsinchu-east" }
+    ],
+    []
+  );
 
   const upcomingInspections = useMemo(() => {
-    return facilities
-      .filter((f) => f.lastInspection)
+    return demoFacilities
       .map((f) => {
         const last = f.lastInspection ? new Date(f.lastInspection).getTime() : Date.now();
         const nextDue = last + 30 * 24 * 60 * 60 * 1000;
         const daysLeft = Math.max(0, Math.round((nextDue - Date.now()) / (1000 * 60 * 60 * 24)));
-        // Find area by geometry
-        let areaName = "未指定";
-        if (f.coords) {
-          const foundArea = areas.find((a) => a.geom && isPointInsideGeometry(f.coords as [number, number], a.geom as GeoJSON.Geometry));
-          if (foundArea) areaName = foundArea.name;
-        }
+        const areaName = demoAreas.find((a) => a.id === f.areaId)?.name ?? "未指定";
         return {
           id: f.id,
           name: f.name,
           type: f.type,
-          typeLabel: f.typeLabel ?? f.type,
-          typeEmoji: f.typeEmoji ?? undefined,
+          typeLabel: f.type,
+          typeEmoji: undefined,
           area: areaName,
-          areaId: areas.find((a) => a.geom && f.coords && isPointInsideGeometry(f.coords, a.geom as GeoJSON.Geometry))?.id,
+          areaId: f.areaId,
           dueInDays: daysLeft,
           lastInspection: f.lastInspection?.slice(0, 10) ?? "—",
         };
       })
       .sort((a, b) => a.dueInDays - b.dueInDays);
-  }, [areas, facilities]);
+  }, [demoAreas, demoFacilities]);
 
   const filtered = useMemo(() => {
     return upcomingInspections.filter((item) => {
+      if (item.type === "street_light" || item.type === "cctv") return false;
       const matchesArea = area === "all" || item.areaId === area;
       const matchesType = type === "all" || item.type === type;
       const matchesKeyword = keyword ? item.name.includes(keyword) || item.area.includes(keyword) : true;
@@ -85,25 +76,23 @@ function MissionsPage() {
     });
   }, [area, keyword, type, upcomingInspections]);
 
-  const areaOptions = useMemo(() => [{ id: "all", name: "全部區域" }, ...areas], [areas]);
+  const areaOptions = useMemo(() => [{ id: "all", name: "全部區域" }, ...demoAreas], [demoAreas]);
   const typeOptions = useMemo(
     () =>
-      facilityTypes.length
-        ? [{ id: "all", label: "全部類型" }, ...facilityTypes.map((t) => ({ id: t.type, label: t.labelZh ?? t.type }))] :
-        [
-          { id: "all", label: "全部類型" },
-          { id: "building", label: "建築物" },
-          { id: "street_light", label: "路燈" },
-          { id: "park", label: "公園" },
-          { id: "public_toilet", label: "公共廁所" },
-          { id: "bridge", label: "橋樑" },
-          { id: "road", label: "道路" },
-          { id: "bike_station", label: "腳踏車站點" },
-          { id: "cctv", label: "監視器" },
-          { id: "hazardous_factory", label: "危險工廠" },
-          { id: "police_station", label: "警察局" }
-        ],
-    [facilityTypes]
+      [
+        { id: "all", label: "全部類型" },
+        { id: "building", label: "建築物" },
+        { id: "street_light", label: "路燈" },
+        { id: "park", label: "公園" },
+        { id: "public_toilet", label: "公共廁所" },
+        { id: "bridge", label: "橋樑" },
+        { id: "road", label: "道路" },
+        { id: "bike_station", label: "腳踏車站點" },
+        { id: "cctv", label: "監視器" },
+        { id: "hazardous_factory", label: "危險工廠" },
+        { id: "police_station", label: "警察局" }
+      ],
+    []
   );
 
   const handleOpenReport = (facilityId: string) => {

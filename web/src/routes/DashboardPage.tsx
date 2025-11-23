@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import type GeoJSON from "geojson";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -7,7 +7,6 @@ import RiskTrendChart from "../charts/RiskTrendChart";
 import TicketByTypeChart from "../charts/TicketByTypeChart";
 import FacilityGradePieChart from "../charts/FacilityGradePieChart";
 import { Input } from "../components/ui/input";
-import { useDataStore } from "../store/dataStore";
 
 function isPointInsideGeometry(point: [number, number], geom?: GeoJSON.Geometry): boolean {
   if (!geom) return false;
@@ -32,43 +31,89 @@ function isPointInPolygon(point: [number, number], rings: GeoJSON.Position[][]):
 function DashboardPage() {
   const { areaId } = useParams();
   const navigate = useNavigate();
-  const { areas, areaOptions, facilities, tickets, areaRiskSnapshots, loadAll, loading } = useDataStore();
   const [search, setSearch] = useState("");
   const [isSearchOpen, setIsSearchOpen] = useState(false);
 
-  useEffect(() => {
-    // Load names list for search suggestions (lightweight, no geom).
-    loadAll({ lightAreas: true, namesOnly: true }).catch(() => {});
-  }, [loadAll]);
+  const demoAreas = useMemo(
+    () => [
+      { id: "hsinchu-east", name: "竹市東區", geom: undefined, riskScore: 68, code: "300A", county: "新竹市" },
+      { id: "hsinchu-north", name: "竹市北區", geom: undefined, riskScore: 45, code: "300B", county: "新竹市" },
+      { id: "hsinchu-xiangshan", name: "竹市香山", geom: undefined, riskScore: 52, code: "300C", county: "新竹市" },
+      { id: "taoyuan-zhongli", name: "桃園中壢", geom: undefined, riskScore: 60, code: "320A", county: "桃園市" },
+      { id: "taoyuan-taoyuan", name: "桃園桃園區", geom: undefined, riskScore: 58, code: "320B", county: "桃園市" }
+    ],
+    []
+  );
 
-  useEffect(() => {
-    if (areaId) {
-      loadAll({ areaId, lightAreas: true }).catch(() => {});
-    }
-  }, [loadAll, areaId]);
+  const demoFacilities = useMemo(
+    () => [
+      { id: "f1", name: "關新公園", type: "park", grade: "B", areaId: "hsinchu-east", lastInspection: "2024-11-01" },
+      { id: "f2", name: "光復路路燈 #12", type: "street_light", grade: "A", areaId: "hsinchu-east", lastInspection: "2024-11-10" },
+      { id: "f3", name: "經國派出所", type: "police_station", grade: "A", areaId: "hsinchu-north", lastInspection: "2024-11-05" },
+      { id: "f4", name: "青草湖步道", type: "road", grade: "C", areaId: "hsinchu-xiangshan", lastInspection: "2024-10-12" },
+      { id: "f5", name: "陽明公園", type: "park", grade: "A", areaId: "hsinchu-east", lastInspection: "2024-10-25" },
+      { id: "f6", name: "科園路監視器 #3", type: "cctv", grade: "A", areaId: "hsinchu-east", lastInspection: "2024-10-30" },
+      { id: "f7", name: "新竹火車站前路燈 #8", type: "street_light", grade: "B", areaId: "hsinchu-north", lastInspection: "2024-11-02" },
+      { id: "f8", name: "中壢中央公園", type: "park", grade: "B", areaId: "taoyuan-zhongli", lastInspection: "2024-10-15" },
+      { id: "f9", name: "桃園藝文特區路燈 #21", type: "street_light", grade: "C", areaId: "taoyuan-taoyuan", lastInspection: "2024-10-05" },
+      { id: "f10", name: "中壢派出所", type: "police_station", grade: "A", areaId: "taoyuan-zhongli", lastInspection: "2024-11-08" },
+      { id: "f11", name: "元培醫院旁人行道", type: "road", grade: "C", areaId: "hsinchu-east", lastInspection: "2024-10-18" },
+      { id: "f12", name: "香山海岸公園", type: "park", grade: "C", areaId: "hsinchu-xiangshan", lastInspection: "2024-09-28" },
+      { id: "f13", name: "桃園國民運動中心", type: "building", grade: "B", areaId: "taoyuan-taoyuan", lastInspection: "2024-10-20" }
+    ],
+    []
+  );
+
+  const demoTickets = useMemo(
+    () => [
+      { id: "t1", areaId: "hsinchu-east", type: "路燈故障", status: "open", severity: 2, slaDueAt: "2024-12-05", createdAt: "2024-11-15" },
+      { id: "t2", areaId: "hsinchu-east", type: "路燈故障", status: "in_progress", severity: 2, slaDueAt: "2024-12-01", createdAt: "2024-11-10" },
+      { id: "t3", areaId: "hsinchu-east", type: "路燈故障", status: "assigned", severity: 1, slaDueAt: "2024-12-07", createdAt: "2024-11-18" },
+      { id: "t4", areaId: "hsinchu-north", type: "人行道破損", status: "open", severity: 3, slaDueAt: "2024-11-28", createdAt: "2024-11-08" },
+      { id: "t5", areaId: "hsinchu-xiangshan", type: "步道坑洞", status: "completed", severity: 1, slaDueAt: "2024-11-20", createdAt: "2024-10-30" },
+      { id: "t6", areaId: "hsinchu-east", type: "監視器畫面模糊", status: "assigned", severity: 1, slaDueAt: "2024-12-03", createdAt: "2024-11-18" },
+      { id: "t7", areaId: "taoyuan-zhongli", type: "公園照明不足", status: "in_progress", severity: 2, slaDueAt: "2024-12-08", createdAt: "2024-11-12" },
+      { id: "t8", areaId: "taoyuan-taoyuan", type: "路燈故障", status: "open", severity: 2, slaDueAt: "2024-12-02", createdAt: "2024-11-14" },
+      { id: "t9", areaId: "taoyuan-zhongli", type: "路燈故障", status: "open", severity: 1, slaDueAt: "2024-12-18", createdAt: "2024-11-16" },
+      { id: "t10", areaId: "taoyuan-taoyuan", type: "路燈故障", status: "in_progress", severity: 2, slaDueAt: "2024-12-12", createdAt: "2024-11-11" },
+      { id: "t11", areaId: "taoyuan-zhongli", type: "派出所外牆滲水", status: "open", severity: 1, slaDueAt: "2024-12-20", createdAt: "2024-11-05" }
+    ],
+    []
+  );
+
+  const demoRiskSnapshots = useMemo(
+    () => [
+      { areaId: "hsinchu-east", computedAt: "2024-09-01", riskScore: 58, _computedAtRaw: "2024-09-01" },
+      { areaId: "hsinchu-east", computedAt: "2024-10-01", riskScore: 62, _computedAtRaw: "2024-10-01" },
+      { areaId: "hsinchu-east", computedAt: "2024-11-15", riskScore: 68, _computedAtRaw: "2024-11-15" },
+      { areaId: "hsinchu-north", computedAt: "2024-11-15", riskScore: 45, _computedAtRaw: "2024-11-15" },
+      { areaId: "hsinchu-xiangshan", computedAt: "2024-10-01", riskScore: 48, _computedAtRaw: "2024-10-01" },
+      { areaId: "hsinchu-xiangshan", computedAt: "2024-11-15", riskScore: 52, _computedAtRaw: "2024-11-15" },
+      { areaId: "taoyuan-zhongli", computedAt: "2024-09-15", riskScore: 55, _computedAtRaw: "2024-09-15" },
+      { areaId: "taoyuan-zhongli", computedAt: "2024-11-01", riskScore: 58, _computedAtRaw: "2024-11-01" },
+      { areaId: "taoyuan-zhongli", computedAt: "2024-11-15", riskScore: 60, _computedAtRaw: "2024-11-15" },
+      { areaId: "taoyuan-taoyuan", computedAt: "2024-10-15", riskScore: 56, _computedAtRaw: "2024-10-15" },
+      { areaId: "taoyuan-taoyuan", computedAt: "2024-11-15", riskScore: 58, _computedAtRaw: "2024-11-15" }
+    ],
+    []
+  );
 
   const selectedArea = useMemo(
-    () => areas.find((a) => a.id === areaId) ?? areas[0],
-    [areaId, areas]
+    () => demoAreas.find((a) => a.id === areaId) ?? demoAreas[0],
+    [areaId, demoAreas]
   );
 
   // Use areaOptions for display name if selectedArea doesn't have full data
-  const displayName = selectedArea?.name ?? areaOptions.find((a) => a.id === areaId)?.name ?? "未選擇區域";
+  const displayName = selectedArea?.name ?? "未選擇區域";
 
   const areaFacilities = useMemo(
-    () => facilities.filter((f) => {
-      if (!f.coords || !selectedArea?.geom) return false;
-      return isPointInsideGeometry(f.coords, selectedArea.geom as GeoJSON.Geometry);
-    }),
-    [facilities, selectedArea]
+    () => demoFacilities.filter((f) => f.areaId === selectedArea?.id),
+    [demoFacilities, selectedArea?.id]
   );
 
   const areaTickets = useMemo(
-    () => tickets.filter((t) => {
-      if (!t.coords || !selectedArea?.geom) return false;
-      return isPointInsideGeometry(t.coords, selectedArea.geom as GeoJSON.Geometry);
-    }),
-    [tickets, selectedArea]
+    () => demoTickets.filter((t) => t.areaId === selectedArea?.id),
+    [demoTickets, selectedArea?.id]
   );
 
   const stats = useMemo(() => {
@@ -105,7 +150,7 @@ function DashboardPage() {
   }, [areaTickets]);
 
   const trendData = useMemo(() => {
-    const rows = areaRiskSnapshots.filter((r) => r.areaId === selectedArea?.id);
+    const rows = demoRiskSnapshots.filter((r) => r.areaId === selectedArea?.id);
     if (rows.length === 0) {
       if (!selectedArea?.id) return [];
       return [{ date: new Date().toISOString().slice(0, 10), score: derivedRisk }];
@@ -113,17 +158,15 @@ function DashboardPage() {
     return rows
       .sort((a, b) => new Date(a._computedAtRaw).getTime() - new Date(b._computedAtRaw).getTime())
       .map((r) => ({ date: r.computedAt, score: r.riskScore ?? derivedRisk }));
-  }, [areaRiskSnapshots, selectedArea?.id, derivedRisk]);
+  }, [demoRiskSnapshots, selectedArea?.id, derivedRisk]);
 
   const searchHits = useMemo(() => {
-    const source = areaOptions.length ? areaOptions : areas;
-    if (!source.length) return [];
+    const source = demoAreas;
     const term = search.trim().toLowerCase();
-    const base = term
+    return term
       ? source.filter((a) => a.name.toLowerCase().includes(term) || (a.code ?? "").toLowerCase().includes(term))
       : source;
-    return base;
-  }, [areaOptions, areas, search]);
+  }, [demoAreas, search]);
 
   return (
     <div className="px-6 py-6 space-y-4">
@@ -240,7 +283,7 @@ function DashboardPage() {
         </Card>
       </div>
 
-      {loading && <p className="text-xs text-slate-400">載入資料中...</p>}
+      <p className="text-xs text-slate-400">使用 demo 資料展示圖表</p>
     </div>
   );
 }
